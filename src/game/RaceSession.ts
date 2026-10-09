@@ -13,7 +13,7 @@ import { ItemsView } from '../render/ItemsView';
 import { KartView } from '../render/KartView';
 import { Effects } from '../render/Particles';
 import type { Renderer, Viewport } from '../render/Renderer';
-import { SCENERY } from '../render/scenery';
+import { sceneryFor } from '../render/scenery';
 import type { SceneryHandle } from '../render/scenery/types';
 import { buildTrackView } from '../render/track/TrackView';
 import { GhostView } from '../render/GhostView';
@@ -83,14 +83,16 @@ export class RaceSession {
   async load(onProgress: (p: number, label: string) => void): Promise<void> {
     const q = this.renderer.quality;
     onProgress(0.1, 'Paving the track…');
-    this.env = new Environment(this.scene, this.opts.track.lighting, q);
-    this.scene.environment = this.renderer.envMap();
-    this.scene.environmentIntensity = 0.35;
+    const lighting = this.opts.track.lighting;
+    const indoor = this.opts.track.theme === 'kitchen';
+    this.env = new Environment(this.scene, lighting, q, this.opts.track.theme);
+    this.scene.environment = indoor ? this.renderer.envMap() : this.renderer.skyEnvMap(lighting, this.env.sunDir);
+    this.scene.environmentIntensity = indoor ? 0.4 : 0.5;
     this.trackView = buildTrackView(this.track, q);
     this.scene.add(this.trackView.group);
     await tick();
     onProgress(0.35, 'Building the neighborhood…');
-    const builder = await SCENERY[this.opts.track.theme]();
+    const builder = await sceneryFor(this.opts.track)();
     this.scene.add(this.sceneryGroup);
     this.scenery = builder({ track: this.track, group: this.sceneryGroup, quality: q });
     await tick();
@@ -102,7 +104,7 @@ export class RaceSession {
     }
     this.items = new ItemsView(this.sim);
     this.scene.add(this.items.group);
-    this.fx = new Effects(this.scene, q);
+    this.fx = new Effects(this.scene, q, this.opts.track.theme);
     if (this.opts.ghost && this.opts.mode === 'timeTrial') {
       this.ghostView = new GhostView(this.opts.ghost);
       this.scene.add(this.ghostView.root);
@@ -366,7 +368,7 @@ export class RaceSession {
     const viewports: Viewport[] = [];
     if (this.players.length === 0) {
       this.updateSpectator(dt);
-      this.env.follow(this.kartViews[this.spectatorTarget]?.interpPos ?? new THREE.Vector3());
+      this.env.follow(this.kartViews[this.spectatorTarget]?.interpPos ?? new THREE.Vector3(), this.spectatorCam);
       this.fx.setViewportHeight(this.renderer.height);
       viewports.push({ camera: this.spectatorCam, rect: [0, 0, 1, 1] });
     } else {
@@ -374,9 +376,9 @@ export class RaceSession {
         const cam = this.cameras[i];
         if (dt > 0) cam.update(this.cameraTarget(p, p.playerIndex), dt);
         const rect: [number, number, number, number] = this.players.length === 1 ? [0, 0, 1, 1] : i === 0 ? [0, 0.5, 1, 0.5] : [0, 0, 1, 0.5];
-        viewports.push({ camera: cam.camera, rect });
+        viewports.push({ camera: cam.camera, rect, fx: { speed: Math.max(0, p.forwardSpeed) / p.tuning.maxSpeed, boost: p.boostTime > 0 ? 1 : 0 } });
       });
-      this.env.follow(this.kartViews[this.players[0].id].interpPos);
+      this.env.follow(this.kartViews[this.players[0].id].interpPos, this.cameras[0].camera);
       this.fx.setViewportHeight(this.renderer.height / this.players.length);
     }
     this.renderer.render(this.scene, viewports);

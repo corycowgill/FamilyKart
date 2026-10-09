@@ -479,3 +479,61 @@ export function disposeGroup(root: THREE.Object3D): void {
   for (const d of seen) d.dispose();
   root.clear();
 }
+
+/**
+ * Vertex-colored material where only pure-white vertices take the per-instance color (shirts, train
+ * stripes, awnings...) and every other baked color is kept. Optional `bob` makes instances hop
+ * (cheering crowds) using a phase derived from their position.
+ */
+export function tintMaskMat(bag: Bag, opts: THREE.MeshStandardMaterialParameters = {}, bob?: { time: { value: number }; amp: number; speed: number }): THREE.MeshStandardMaterial {
+  const m = bag.add(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, ...opts }));
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace(
+      '#include <color_vertex>',
+      `vColor = vec3(1.0);
+      #ifdef USE_COLOR
+      vColor *= color;
+      #endif
+      #ifdef USE_INSTANCING_COLOR
+      { float tm = step(2.97, color.r + color.g + color.b); vColor.xyz *= mix(vec3(1.0), instanceColor.xyz, tm); }
+      #endif`,
+    );
+    if (bob) {
+      sh.uniforms.uTime = bob.time;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float uTime;')
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+          { float ph = instanceMatrix[3].x * 1.37 + instanceMatrix[3].z * 0.71;
+            float hop = abs(sin(uTime * ${bob.speed.toFixed(2)} + ph));
+            transformed.y += hop * ${bob.amp.toFixed(3)} * step(0.5, fract(ph * 0.31) + 0.35);
+            transformed.x += sin(uTime * 2.0 + ph) * 0.06 * position.y; }
+          #endif`,
+        );
+    }
+  };
+  m.customProgramCacheKey = () => `tintmask-${bob ? `${bob.amp}-${bob.speed}` : 'static'}`;
+  return m;
+}
+
+/**
+ * Below 'high', only big casters keep shadows (fewer shadow-pass draw calls); at 'low' small
+ * instanced props stop receiving too. Call after the scenery group is complete.
+ */
+export function trimShadows(root: THREE.Object3D, quality: 'low' | 'medium' | 'high'): void {
+  if (quality === 'high') return;
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+    let r = m.geometry.boundingSphere?.radius ?? 0;
+    const im = o as THREE.InstancedMesh;
+    if (im.isInstancedMesh) {
+      if (!im.boundingSphere) im.computeBoundingSphere();
+      r = Math.min(r * 4, im.boundingSphere?.radius ?? r);
+    }
+    if (r < (quality === 'medium' ? 25 : 1e9)) m.castShadow = false;
+  });
+}

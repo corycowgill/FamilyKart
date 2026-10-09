@@ -365,15 +365,7 @@ export function dotTexture(inner = 'rgba(255,255,255,1)', outer = 'rgba(255,255,
 export function flagTexture(kind: 'chicago' | 'checker' | 'usa' | 'pennant'): THREE.CanvasTexture {
   if (kind === 'checker') return checkerTexture('#ffffff', '#111111', 6);
   return canvasTexture(192, 128, (g, w, h) => {
-    if (kind === 'chicago') {
-      g.fillStyle = '#ffffff';
-      g.fillRect(0, 0, w, h);
-      g.fillStyle = '#6ec6ee';
-      g.fillRect(0, h * 0.18, w, h * 0.13);
-      g.fillRect(0, h * 0.69, w, h * 0.13);
-      g.fillStyle = '#e4222b';
-      for (let i = 0; i < 4; i++) star(g, w * (0.2 + i * 0.2), h * 0.5, h * 0.12, h * 0.05, 6);
-    } else if (kind === 'usa') {
+    if (kind === 'chicago') drawChicagoFlag(g, 0, 0, w, h); else if (kind === 'usa') {
       for (let i = 0; i < 13; i++) {
         g.fillStyle = i % 2 ? '#ffffff' : '#c8202f';
         g.fillRect(0, (i * h) / 13, w, h / 13 + 1);
@@ -417,4 +409,91 @@ export function crowdTexture(seed = 41): THREE.CanvasTexture {
       }
     }
   }, { seed });
+}
+
+/** The Chicago municipal flag: white field, two light-blue stripes, four red six-pointed stars. */
+export function drawChicagoFlag(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  g.fillStyle = '#ffffff';
+  g.fillRect(x, y, w, h);
+  g.fillStyle = '#41B6E6';
+  g.fillRect(x, y + h / 6, w, h / 6);
+  g.fillRect(x, y + (h * 4) / 6, w, h / 6);
+  g.fillStyle = '#E4002B';
+  const r = Math.min(h * 0.14, w * 0.075);
+  for (let i = 0; i < 4; i++) star(g, x + w * (0.2 + i * 0.2), y + h * 0.5, r, r * 0.5, 6);
+}
+
+/** Vertical lamp-post banner (u across, v up): Chicago flag on top, CHICAGO lettering below. */
+export function chicagoBannerTexture(): THREE.CanvasTexture {
+  return canvasTexture(128, 256, (g, w, h) => {
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, w, h);
+    drawChicagoFlag(g, 0, 0, w, h * 0.42);
+    g.fillStyle = '#41B6E6';
+    g.fillRect(0, h * 0.42, w, h * 0.58);
+    g.fillStyle = '#ffffff';
+    g.font = '900 30px "Arial Black", Impact, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    'CHI'.split('').forEach((c, i) => g.fillText(c, w / 2, h * 0.52 + i * 34));
+    g.fillStyle = '#E4002B';
+    star(g, w / 2, h * 0.93, 11, 5.5, 6);
+  }, { repeat: false });
+}
+
+/**
+ * Equirectangular reflection map for chrome objects (the Bean): sky gradient, puffy clouds, a ring of
+ * skyline silhouettes at the horizon and a pale plaza below. `dusk` paints a lit winter evening.
+ */
+export function cityEnvTexture(dusk: boolean): THREE.CanvasTexture {
+  const t = canvasTexture(1024, 512, (g, w, h, rng) => {
+    const sky = g.createLinearGradient(0, 0, 0, h * 0.5);
+    if (dusk) {
+      sky.addColorStop(0, '#1d2350');
+      sky.addColorStop(0.6, '#6b4f86');
+      sky.addColorStop(1, '#f29a7a');
+    } else {
+      sky.addColorStop(0, '#2f7fe0');
+      sky.addColorStop(0.65, '#8cc4f5');
+      sky.addColorStop(1, '#ffe6c4');
+    }
+    g.fillStyle = sky;
+    g.fillRect(0, 0, w, h * 0.5);
+    if (!dusk) {
+      g.fillStyle = 'rgba(255,255,255,0.9)';
+      for (let i = 0; i < 14; i++) {
+        const cx = rng.next() * w, cy = rng.range(h * 0.12, h * 0.36);
+        for (let k = 0; k < 5; k++) {
+          g.beginPath();
+          g.ellipse(cx + rng.range(-40, 40), cy + rng.range(-8, 8), rng.range(18, 40), rng.range(8, 16), 0, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+    }
+    // ground: plaza near the horizon, darker straight down
+    const gr = g.createLinearGradient(0, h * 0.5, 0, h);
+    gr.addColorStop(0, dusk ? '#c9cfdc' : '#b9b4aa');
+    gr.addColorStop(0.3, dusk ? '#eef3fb' : '#d8d2c6');
+    gr.addColorStop(1, dusk ? '#9aa3b8' : '#6f6a62');
+    g.fillStyle = gr;
+    g.fillRect(0, h * 0.5, w, h * 0.5);
+    // skyline ring
+    let x = 0;
+    while (x < w) {
+      const bw = rng.range(10, 34), bh = rng.range(14, 90) * (rng.chance(0.1) ? 1.6 : 1);
+      const col = dusk ? rng.pick(['#232744', '#2c2f52', '#1b1f3a']) : rng.pick(['#5d7391', '#7d8fa8', '#c9b79a', '#3c4656', '#9fb3c9']);
+      g.fillStyle = col;
+      g.fillRect(x, h * 0.5 - bh, bw, bh);
+      g.fillStyle = dusk ? '#ffd27a' : 'rgba(255,255,255,0.35)';
+      for (let yy = h * 0.5 - bh + 3; yy < h * 0.5 - 2; yy += 5) for (let xx = x + 2; xx < x + bw - 2; xx += 4) if (rng.chance(dusk ? 0.35 : 0.25)) g.fillRect(xx, yy, 2, 2);
+      x += bw + rng.range(0, 6);
+    }
+    // people specks on the plaza
+    for (let i = 0; i < 160; i++) {
+      g.fillStyle = rng.pick(['#e8443a', '#2f7de1', '#ffd23f', '#3ccf6e', '#222', '#ffffff']);
+      g.fillRect(rng.next() * w, rng.range(h * 0.52, h * 0.62), 2, 4);
+    }
+  }, { seed: dusk ? 991 : 990, repeat: false });
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  return t;
 }

@@ -2,9 +2,13 @@ import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { TrackSample } from '../../sim/track/Track';
 import type { SceneryContext, SceneryHandle } from './types';
-import { Batch, boxUV, ctxBits, disposeGroup, elevatedTrain, M, mergeColored, PROPS, setInstance, unitBox, vcMat, windowedMaterial } from './common';
+import { Batch, trimShadows, ctxBits, disposeGroup, flagGeometry, flagMaterial, M, mergeColored, PROPS, setInstance, unitBox, vcMat, windowedMaterial } from './common';
 import { getField } from './field';
-import { canvasTexture, dotTexture, textTexture, windowLitTexture, windowTexture } from './textures';
+import { canvasTexture, dotTexture, flagTexture, windowLitTexture, windowTexture } from './textures';
+import {
+  aonCenter, bannerBatch, beefStand, bluesClub, pizzeria, chicagoTheatre, cloudGate, CTA, dibsGeo, elevatedL, glassSpireTower, hancockCenter, hotDogStand, Kit, marinaCity,
+  rooftopTankGeo, tribuneTower, willisTower, wrigleyBuilding,
+} from './chicagoLandmarks';
 
 type P = Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>;
 
@@ -25,6 +29,9 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
   const glowMat = (color: string) => bag.add(new THREE.MeshBasicMaterial({ color, toneMapped: false }));
   const b = field.bounds;
   const parts: P = [];
+  const kit = new Kit(bag, group, { lit: 1.1, snow: true, quality });
+  const lo = quality === 'low', hi = quality === 'high';
+  const shirt = ['#d7263d', '#2f7de1', '#3ccf6e', '#ffd23f', '#b26bff', '#ff8a3d', '#ffffff', '#41B6E6'];
   const nearestMain = (x: number, z: number): TrackSample => {
     let best = track.paths[0].samples[0], bd = Infinity;
     for (const s of track.paths[0].samples) {
@@ -71,7 +78,34 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
   }
 
   /* ------------------------------------------------ L line crossing the course */
-  for (const l of lm('ltrain')) updaters.push(elevatedTrain(group, bag, placer, { x0: -260, x1: 272, z: l.z, snow: true, lit: true }));
+  /* ------------------------------------------------ signature skyline to the west (lit windows) */
+  {
+    const land = (x: number, z: number, r: number) => {
+      placer.reserve(x, z, r);
+      return field.height(x, z);
+    };
+    willisTower(kit, -265, land(-265, 40, 32), 40);
+    hancockCenter(kit, -205, land(-205, 300, 30), 300, 0.2);
+    glassSpireTower(kit, -250, land(-250, 175, 26), 175, 0.1);
+    aonCenter(kit, -225, land(-225, -205, 26), -205);
+    marinaCity(kit, -130, land(-130, 335, 30), 335, 0.3);
+    if (!lo) {
+      tribuneTower(kit, -170, land(-170, -90, 18), -90);
+      wrigleyBuilding(kit, -120, land(-110, -300, 32), -300, 0);
+    }
+  }
+  for (const l of lm('ltrain')) {
+    elevatedL(kit, placer, {
+      a: [-260, l.z], b: [272, l.z], snow: true, lit: true,
+      lines: lo ? [CTA.red] : [CTA.red, CTA.brown],
+      cars: lo ? 4 : 5,
+      stations: [{ at: 0.42, name: 'WASHINGTON/WABASH', color: CTA.brown }],
+      period: 26,
+    });
+  }
+
+  /* ------------------------------------------------ blues clubs (before the street walls are filled in) */
+  for (const sp of placer.along(0, lo ? 1600 : 640, 14, 9, { side: 0 })) bluesClub(kit, sp.x, sp.y, sp.z, sp.yaw);
 
   /* ------------------------------------------------ landmarks */
   // giant Christmas tree with ornaments + star
@@ -93,17 +127,66 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
     group.add(star);
     updaters.push((_dt, t) => (star.rotation.y = t * 1.2));
     placer.reserve(c.x, c.z, 14);
+    // spiral of warm light strings around the tree
+    for (let i = 0; i < 160; i++) {
+      const f = i / 160;
+      const a = f * Math.PI * 2 * 7;
+      const yy = 3.0 * s + f * 8.4 * s;
+      const rr = (1 - f) * 2.75 * s + 0.4;
+      kit.glow.push([new THREE.OctahedronGeometry(0.32, 0), ['#fff1b0', '#ffd27a', '#ff6b5a', '#8fd8ff'][i % 4], M.t(c.x + Math.cos(a) * rr, y0 + yy, c.z + Math.sin(a) * rr)]);
+    }
+    // Christkindlmarket: wooden stalls with striped roofs + string lights in a ring around the tree
+    const stall = mergeColored([
+      [new THREE.BoxGeometry(4.4, 2.6, 3.2), '#8a5a36', M.t(0, 1.3, 0)],
+      [new THREE.BoxGeometry(3.6, 1.2, 0.2), '#2a1a10', M.t(0, 1.75, 1.62)],
+      [new THREE.BoxGeometry(4.0, 0.2, 0.7), '#b07a4a', M.t(0, 1.1, 1.9)],
+      [new THREE.BoxGeometry(5.0, 0.18, 2.3), '#ffffff', M.trs(0, 3.2, 0.95, 0.55, 0, 0)],
+      [new THREE.BoxGeometry(5.0, 0.18, 2.3), '#ffffff', M.trs(0, 3.2, -0.95, -0.55, 0, 0)],
+      [new THREE.BoxGeometry(5.0, 0.2, 2.0), '#f4f8ff', M.trs(0, 3.35, 0.85, 0.55, 0, 0)],
+      [new THREE.BoxGeometry(5.0, 0.2, 2.0), '#f4f8ff', M.trs(0, 3.35, -0.85, -0.55, 0, 0)],
+      [new THREE.BoxGeometry(3.0, 0.7, 0.12), '#1f6b3a', M.t(0, 2.9, 1.95)],
+      [new THREE.BoxGeometry(5.1, 0.25, 0.25), '#2f7a3a', M.t(0, 2.55, 2.0)],
+    ]);
+    const bulbs: P = [];
+    for (let i = 0; i < 11; i++) bulbs.push([new THREE.OctahedronGeometry(0.13, 0), ['#ffe08a', '#ff5a5a', '#7fe08a', '#8fd8ff'][i % 4], M.t(-2.4 + i * 0.48, 2.42 - Math.sin((i / 10) * Math.PI) * 0.25, 2.15)]);
+    const stalls = kit.batch(stall, kit.tintMat, { name: 'marketStalls' });
+    const lights = kit.batch(mergeColored(bulbs), kit.glowMat, { name: 'marketLights', cast: false });
+    const nStall = lo ? 6 : hi ? 16 : 11;
+    let placed = 0;
+    for (let i = 0; i < 40 && placed < nStall; i++) {
+      const ring = i < 14 ? 24 : 36;
+      const a = (i / (i < 14 ? 14 : 26)) * Math.PI * 2 + (ring > 30 ? 0.12 : 0);
+      const x = c.x + Math.cos(a) * ring, z = c.z + Math.sin(a) * ring;
+      if (!placer.ok(x, z, 3.2, 3)) continue;
+      placer.reserve(x, z, 3.2);
+      const yaw = Math.atan2(c.x - x, c.z - z);
+      const yy = field.height(x, z);
+      stalls.add(x, yy, z, yaw, 1, 1, 1, rng.pick(['#d7263d', '#1f8f4a', '#d7263d', '#ffd23f']));
+      lights.add(x, yy, z, yaw);
+      placed++;
+      if (!lo) for (let p = 0; p < (hi ? 3 : 2); p++) {
+        const d = ring - rng.range(4, 9), aa = a + rng.range(-0.12, 0.12);
+        const px = c.x + Math.cos(aa) * d, pz = c.z + Math.sin(aa) * d;
+        kit.person(px, field.height(px, pz), pz, yaw + Math.PI + rng.range(-0.6, 0.6), rng.pick(shirt));
+      }
+    }
+    const sign = kit.paint.text('CHRISTKINDLMARKET', 512, 96, { bg: '#7a1420', fg: '#ffe9b0', border: '#ffd23f' });
+    const gx = c.x + 18, gz = c.z - 46;
+    if (placer.ok(gx, gz, 4, 2)) {
+      kit.solid.push([new THREE.BoxGeometry(0.5, 6, 0.5), '#5a3a26', M.t(gx - 6, 3, gz)]);
+      kit.solid.push([new THREE.BoxGeometry(0.5, 6, 0.5), '#5a3a26', M.t(gx + 6, 3, gz)]);
+      kit.paint.quad(sign, 12.5, 2.3, M.trs(gx, 6.2, gz, 0, 0, 0), true);
+    }
   }
-  // the Bean
+  // the Bean, dusted with snow, with a few admirers
   for (const c of lm('bean')) {
-    const y0 = field.height(c.x, c.z);
-    const bean = new THREE.Mesh(bag.add(new THREE.SphereGeometry(1, 40, 24)), bag.add(new THREE.MeshStandardMaterial({ color: '#d9e3ef', metalness: 0.55, roughness: 0.08, emissive: '#2a3550', emissiveIntensity: 0.3 })));
-    bean.scale.set(11, 5.2, 7);
-    bean.position.set(c.x, y0 + 4.6, c.z);
-    bean.castShadow = true;
-    group.add(bean);
-    parts.push([new THREE.CylinderGeometry(20, 20, 0.4, 32), '#d8dde6', M.t(c.x, y0 + 0.2, c.z)]);
-    placer.reserve(c.x, c.z, 20);
+    cloudGate(kit, c.x, field.height(c.x, c.z), c.z, 0.2);
+    placer.reserve(c.x, c.z, 27);
+    if (!lo) for (let i = 0; i < (hi ? 16 : 8); i++) {
+      const a = rng.next() * Math.PI * 2, d = rng.range(13, 21);
+      const x = c.x + Math.cos(a) * d, z = c.z + Math.sin(a) * d;
+      kit.person(x, field.height(x, z) + 0.4, z, Math.atan2(c.x - x, c.z - z), rng.pick(shirt), rng.range(0.7, 1));
+    }
   }
   // ice rink with skaters
   const skaters: Array<{ cx: number; cz: number; r: number; w: number; ph: number; y: number }> = [];
@@ -141,34 +224,11 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
   for (const c of lm('marquee')) {
     const smp = nearestMain(c.x, c.z);
     const side = Math.sign((c.x - smp.x) * smp.nx + (c.z - smp.z) * smp.nz) || 1;
-    const lat = side * (smp.halfWidth + def.shoulder + 14);
+    const lat = side * (smp.halfWidth + def.shoulder + 12);
     const x = smp.x + smp.nx * lat, z = smp.z + smp.nz * lat;
-    const y0 = field.height(x, z);
     const yaw = Math.atan2(-smp.nx * side, -smp.nz * side);
-    const m = M.trs(x, y0, z, 0, yaw, 0);
-    const p = (g: THREE.BufferGeometry, col: string, local: THREE.Matrix4) => parts.push([g, col, m.clone().multiply(local)]);
-    p(new THREE.BoxGeometry(34, 26, 16), '#c9b38f', M.t(0, 13, -6));
-    p(new THREE.BoxGeometry(34.6, 1.2, 16.6), '#ffffff', M.t(0, 26.4, -6));
-    p(new THREE.BoxGeometry(22, 4, 4), '#b8141f', M.t(0, 7, 3.6));
-    p(new THREE.BoxGeometry(5, 26, 2), '#b8141f', M.t(0, 20, 4));
-    const signTex = bag.add(canvasTexture(64, 512, (g, w, h) => {
-      g.fillStyle = '#b8141f';
-      g.fillRect(0, 0, w, h);
-      g.fillStyle = '#fff6d6';
-      g.font = '900 52px "Arial Black", Impact, sans-serif';
-      g.textAlign = 'center';
-      'CHICAGO'.split('').forEach((ch, i) => g.fillText(ch, w / 2, 60 + i * 66));
-    }, { repeat: false }));
-    const sign = new THREE.Mesh(bag.add(new THREE.PlaneGeometry(4.2, 24)), bag.add(new THREE.MeshBasicMaterial({ map: signTex, toneMapped: false })));
-    sign.position.set(x + Math.sin(yaw) * 5.05, y0 + 20, z + Math.cos(yaw) * 5.05);
-    sign.rotation.y = yaw;
-    group.add(sign);
-    const mq = bag.add(textTexture('HAPPY HOLIDAYS', { w: 1024, h: 160, bg: '#1b1b1b', fg: '#ffe7a3', border: '#ffcc33' }));
-    const board = new THREE.Mesh(bag.add(new THREE.PlaneGeometry(21, 3.4)), bag.add(new THREE.MeshBasicMaterial({ map: mq, toneMapped: false })));
-    board.position.set(x + Math.sin(yaw) * 5.65, y0 + 7, z + Math.cos(yaw) * 5.65);
-    board.rotation.y = yaw;
-    group.add(board);
-    placer.reserve(x, z - 4, 20);
+    chicagoTheatre(kit, x, field.height(x, z), z, yaw, ['HAPPY HOLIDAYS', 'SNOWPOCALYPSE TONIGHT!']);
+    placer.reserve(x - Math.sin(yaw) * 9, z - Math.cos(yaw) * 9, 20);
   }
   // lighthouse on the frozen lake
   for (const c of lm('lighthouse')) {
@@ -200,12 +260,32 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
     const batches = mats.map((m) => new Batch(box, m, { name: 'buildings' }));
     const roofs = new Batch(box, bag.add(new THREE.MeshStandardMaterial({ color: '#f4f8ff', roughness: 0.9 })), { cast: false });
     const tints = ['#ffffff', '#f2e8dc', '#e3e9f2', '#ffe9dc', '#e9e2f5'];
+    const tanks = new Batch(bag.add(rooftopTankGeo(true)), vc, { name: 'rooftopTanks' });
     const add = (x: number, y: number, z: number, w: number, h: number, d: number, yaw: number) => {
       batches[rng.int(3)].add(x, y, z, yaw, w, h, d, rng.pick(tints));
       roofs.add(x, y + h, z, yaw, w + 0.4, 0.9, d + 0.4);
+      if (h < 50 && rng.chance(0.45)) tanks.add(x + rng.range(-w, w) * 0.25, y + h + 0.9, z + rng.range(-d, d) * 0.25, rng.next() * 6, 1.1);
     };
+    // street-level shops: glowing windows + colorful awnings on the buildings facing the road
+    const shopGeo = mergeColored([
+      [new THREE.BoxGeometry(13, 0.16, 1.8), '#ffffff', M.trs(0, 3.7, 0.8, 0.35, 0, 0)],
+      [new THREE.BoxGeometry(13.4, 1.0, 0.25), '#ffffff', M.t(0, 4.6, 0.1)],
+      [new THREE.BoxGeometry(0.3, 3.3, 0.3), '#2a2a2a', M.t(-6.4, 1.65, 0.15)],
+      [new THREE.BoxGeometry(0.3, 3.3, 0.3), '#2a2a2a', M.t(6.4, 1.65, 0.15)],
+    ]);
+    const shops = kit.batch(shopGeo, kit.tintMat, { name: 'shops', cast: false });
+    const shopGlow = kit.batch(mergeColored([[new THREE.BoxGeometry(12, 2.6, 0.12), '#ffffff', M.t(0, 1.7, 0.08)]]), kit.glowMat, { name: 'shopWindows', cast: false });
+    const awn = ['#d7263d', '#1f8f4a', '#2f6fd1', '#ffb02e', '#7a2fb0', '#d7263d', '#13806f'];
+    const glowC = ['#ffd9a0', '#ffe8c4', '#ffc98a', '#fff1d6'];
     for (let p = 0; p < track.paths.length; p++) {
-      for (const s of placer.along(p, 22, 9, 10, { jitter: 3 })) if (s.x < field.shoreX - 50) add(s.x, s.y - 0.2, s.z, rng.range(16, 22), rng.range(18, 70), rng.range(16, 22), s.yaw);
+      for (const s of placer.along(p, 22, 17, 10, { jitter: 2 })) {
+        if (s.x >= field.shoreX - 50) continue;
+        const w = rng.range(16, 22), d = rng.range(16, 20);
+        add(s.x, s.y - 0.2, s.z, w, rng.range(18, 70), d, s.yaw);
+        const fx = s.x + Math.sin(s.yaw) * (d / 2 + 0.05), fz = s.z + Math.cos(s.yaw) * (d / 2 + 0.05);
+        shops.add(fx, s.y - 0.2, fz, s.yaw, w / 14, 1, 1, rng.pick(awn));
+        shopGlow.add(fx, s.y - 0.2, fz, s.yaw, w / 14, 1, 1, rng.pick(glowC));
+      }
     }
     const rect = { minX: b.minX - 220, maxX: b.maxX - 40, minZ: b.minZ - 200, maxZ: b.maxZ + 200 };
     for (const s of placer.scatter(Math.round(200 * density), rect, 11, 10)) {
@@ -214,30 +294,14 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
     }
     batches.forEach((bb) => bb.build(group));
     roofs.build(group);
-    // a dark Willis-like tower in the west skyline with blinking red antenna lights
-    const sk = lm('skyline')[0];
-    if (sk) {
-      const tx = b.minX - 260, tz = sk.z;
-      const dark = windowedMaterial(bag, bag.add(windowTexture({ wall: '#24262c', glass: '#3a4252', glass2: '#4a556a', seed: 74 })), 9, 14, { emissiveMap: lits[0], emissive: '#ffffff', emissiveIntensity: 0.9 });
-      for (const [i, j, h] of [[-1, -1, 160], [0, -1, 205], [1, -1, 160], [-1, 0, 230], [0, 0, 270], [1, 0, 205], [-1, 1, 160], [0, 1, 230], [1, 1, 270]] as const) {
-        const m = new THREE.Mesh(bag.add(boxUV(13, h, 13, tx + i * 13, 0, tz + j * 13)), dark);
-        group.add(m);
-      }
-      const blink = glowMat('#ff2a2a');
-      for (const [dx, dz, h] of [[4, 6, 340], [11, 19, 332]]) {
-        parts.push([new THREE.CylinderGeometry(0.8, 1.2, 66, 6), '#dddddd', M.t(tx + dx, 270 + 33, tz + dz)]);
-        const l = new THREE.Mesh(bag.add(new THREE.SphereGeometry(1.4, 8, 6)), blink);
-        l.position.set(tx + dx, h, tz + dz);
-        group.add(l);
-      }
-      updaters.push((_dt, t) => blink.color.setRGB(Math.sin(t * 3) > 0 ? 1 : 0.15, 0.05, 0.05));
-    }
+    tanks.build(group);
   }
 
   /* ------------------------------------------------ street lamps + holiday light strings */
   {
     const lamps = new Batch(bag.add(PROPS.lamp('#1d2430', '#fff1c4')), vc, { name: 'lamps' });
     const halos: number[] = [];
+    const banners = lo ? null : bannerBatch(kit);
     const bulbsA: Array<[number, number, number, string]> = [];
     const bulbsB: Array<[number, number, number, string]> = [];
     const cols = ['#ff3b3b', '#3ccf6e', '#ffd23f', '#3aa8ff', '#ff7ad9'];
@@ -258,7 +322,9 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
             continue;
           }
           const y = field.height(x, z);
-          lamps.add(x, y, z, Math.atan2(-smp.nx * side, -smp.nz * side));
+          const lyaw = Math.atan2(-smp.nx * side, -smp.nz * side);
+          lamps.add(x, y, z, lyaw);
+          if (banners && Math.round(s / 18) % 2 === 0) banners.add(x, y + 3.9, z, lyaw - Math.PI / 2);
           halos.push(x - smp.nx * side * 1.4, y + 6.5, z - smp.nz * side * 1.4);
           const top = { x, y: y + 5.6, z };
           if (prev && Math.hypot(prev.x - top.x, prev.z - top.z) < 26) {
@@ -324,8 +390,13 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
     const carCols = ['#d7263d', '#2f7de1', '#3ccf6e', '#ffd23f', '#222831', '#9aa5b1'];
     const cars = new Batch(bag.add(PROPS.car()), vcMat(bag, { roughness: 0.4, metalness: 0.2 }), { name: 'cars' });
     const lumps = new Batch(bag.add(new THREE.SphereGeometry(1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2)), bag.add(new THREE.MeshStandardMaterial({ color: '#f6f9ff', roughness: 0.95 })), { cast: false });
+    const dibs = kit.batch(dibsGeo(), kit.tintMat, { name: 'dibs', cast: false });
     for (const s of placer.along(0, 16, 4.6, 2.4)) {
-      if (rng.chance(0.4)) continue;
+      if (rng.chance(0.4)) {
+        // a shoveled-out parking spot saved with a lawn chair: classic Chicago "dibs"
+        if (rng.chance(0.55)) dibs.add(s.x, s.y, s.z, s.yaw + rng.range(-0.4, 0.4), 1.25, 1.25, 1.25, rng.pick(['#3aa8ff', '#ff5a5a', '#3ccf6e', '#ffd23f', '#ff8ad8']));
+        continue;
+      }
       const yaw = s.yaw + Math.PI / 2;
       cars.add(s.x, s.y, s.z, yaw, 1, 1, 1, rng.pick(carCols));
       lumps.add(s.x, s.y + 1.7, s.z, yaw, 1.0, 0.7, 2.4);
@@ -386,15 +457,124 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
     updaters.push((_dt, t) => (uniforms.uTime.value = t));
   }
 
+  /* ------------------------------------------------ Michigan Avenue trees wrapped in warm lights */
+  {
+    const trunk = kit.batch(mergeColored([
+      [new THREE.CylinderGeometry(0.22, 0.32, 4.2, 6), '#3a2a20', M.t(0, 2.1, 0)],
+      [new THREE.CylinderGeometry(0.08, 0.14, 2.6, 5), '#3a2a20', M.trs(0.6, 4.6, 0, 0, 0, -0.6)],
+      [new THREE.CylinderGeometry(0.08, 0.14, 2.6, 5), '#3a2a20', M.trs(-0.6, 4.6, 0.2, 0, 0, 0.6)],
+      [new THREE.CylinderGeometry(0.08, 0.14, 2.4, 5), '#3a2a20', M.trs(0, 4.7, 0.6, 0.6, 0, 0)],
+      [new THREE.CylinderGeometry(0.08, 0.14, 2.4, 5), '#3a2a20', M.trs(0, 4.7, -0.6, -0.6, 0, 0)],
+      [new THREE.SphereGeometry(1, 8, 4, 0, Math.PI * 2, 0, 1.2), '#f4f8ff', M.trs(0, 0, 0, 0, 0, 0, 1.0, 0.25, 1.0)],
+    ]), vc, { name: 'lightTrees' });
+    const pts: number[] = [];
+    const cols: number[] = [];
+    const warm = [new THREE.Color('#ffd27a'), new THREE.Color('#fff1c4'), new THREE.Color('#ffb85a')];
+    for (let p = 0; p < track.paths.length; p++) {
+      for (const sp of placer.along(p, lo ? 60 : 30, 3.2, 2, { jitter: 0.3 })) {
+        trunk.add(sp.x, sp.y, sp.z, rng.next() * 6, 1.45);
+        const n = lo ? 40 : hi ? 110 : 70;
+        for (let i = 0; i < n; i++) {
+          const a = rng.next() * Math.PI * 2, r = Math.sqrt(rng.next()) * 3.4, yy = rng.range(4.6, 10.2);
+          pts.push(sp.x + Math.cos(a) * r * (1.25 - (yy - 4.6) / 8), sp.y + yy, sp.z + Math.sin(a) * r * (1.25 - (yy - 4.6) / 8));
+          const c = rng.pick(warm);
+          cols.push(c.r, c.g, c.b);
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    bag.add(g);
+    const tm = bag.add(new THREE.PointsMaterial({ size: 0.8, map: bag.add(dotTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)')), vertexColors: true, transparent: true, depthWrite: false, toneMapped: false, color: new THREE.Color(1.6, 1.5, 1.3) }));
+    const tp = new THREE.Points(g, tm);
+    tp.name = 'treeLights';
+    group.add(tp);
+  }
+
+  /* ------------------------------------------------ steaming manholes + hot dog stands + flags */
+  {
+    const vents: number[] = [];
+    for (const sp of placer.along(0, lo ? 200 : 110, 1.2, 1.2)) vents.push(sp.x, sp.y, sp.z);
+    for (let i = 0; i < vents.length; i += 3) parts.push([new THREE.CylinderGeometry(0.7, 0.7, 0.1, 12), '#3a3f47', M.t(vents[i], vents[i + 1] + 0.06, vents[i + 2])]);
+    const PER = 14;
+    const n = (vents.length / 3) * PER;
+    const g = new THREE.BufferGeometry();
+    const seeds = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      const v = Math.floor(i / PER) * 3;
+      seeds.set([vents[v], vents[v + 1], vents[v + 2], rng.next()], i * 4);
+    }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 4));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
+    bag.add(g);
+    const steamU = { uTime: { value: 0 }, uMap: { value: bag.add(dotTexture('rgba(255,255,255,0.9)', 'rgba(255,255,255,0)')) } };
+    const steamMat = bag.add(new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: steamU,
+      vertexShader: `attribute vec4 aSeed; uniform float uTime; varying float vA;
+        void main(){
+          float life = fract(uTime * 0.22 + aSeed.w);
+          vec3 p = aSeed.xyz;
+          p.y += 0.2 + life * 6.0;
+          p.x += sin(aSeed.w * 40.0 + uTime) * life * 1.2 + life * 1.5;
+          p.z += cos(aSeed.w * 23.0 + uTime * 0.7) * life * 1.2;
+          vA = smoothstep(0.0, 0.15, life) * (1.0 - life) * 0.55;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = (1.2 + life * 3.5) * (300.0 / -mv.z);
+        }`,
+      fragmentShader: `uniform sampler2D uMap; varying float vA; void main(){ float a = texture2D(uMap, gl_PointCoord).a; gl_FragColor = vec4(0.92, 0.94, 1.0, a * vA); }`,
+    }));
+    const steam = new THREE.Points(g, steamMat);
+    steam.frustumCulled = false;
+    steam.name = 'manholeSteam';
+    group.add(steam);
+    updaters.push((_dt, t) => (steamU.uTime.value = t));
+
+    const standSpots = placer.along(0, lo ? 500 : 230, 7, 6.5, { side: 0 });
+    standSpots.forEach((sp, i) => {
+      [hotDogStand, pizzeria, hotDogStand, beefStand][i % 4](kit, sp.x, sp.y, sp.z, sp.yaw);
+      if (!lo) for (let k = 0; k < (hi ? 3 : 2); k++) {
+        const lx = -1.6 + k * 1.6, lz = 4.2;
+        const cx = sp.x + Math.cos(sp.yaw) * lx + Math.sin(sp.yaw) * lz, cz = sp.z - Math.sin(sp.yaw) * lx + Math.cos(sp.yaw) * lz;
+        kit.person(cx, field.height(cx, cz), cz, sp.yaw + Math.PI, rng.pick(shirt));
+      }
+    });
+    const fp = kit.batch(PROPS.flagpole(), vc, { name: 'flagpoles' });
+    const fl = kit.batch(flagGeometry(2.6, 1.7), flagMaterial(bag, bag.add(flagTexture('chicago')), kit.time), { cast: false, name: 'flags' });
+    for (const sp of placer.along(0, lo ? 160 : 80, 2.2, 1)) {
+      fp.add(sp.x, sp.y, sp.z, 0);
+      fl.add(sp.x, sp.y + 7.9, sp.z, Math.PI / 2 + 0.6);
+    }
+  }
+
+  /* ------------------------------------------------ frozen lake ice floes */
+  {
+    const floe = kit.batch(new THREE.IcosahedronGeometry(1, 0), bag.add(new THREE.MeshStandardMaterial({ color: '#e6f4ff', roughness: 0.25, metalness: 0.05, flatShading: true })), { name: 'iceFloes', cast: false });
+    const N = lo ? 30 : hi ? 120 : 70;
+    for (let i = 0; i < N; i++) {
+      const x = field.shoreX + rng.range(4, 90) * (rng.chance(0.7) ? 1 : 3), z = rng.range(b.minZ - 300, b.maxZ + 300);
+      floe.add(x, -0.6, z, rng.next() * 6, rng.range(2, 6), rng.range(0.4, 1.2), rng.range(2, 5), rng.pick(['#ffffff', '#dff1ff', '#cfe8fb']));
+    }
+  }
+
+  kit.flush();
+
   if (parts.length) {
     const m = new THREE.Mesh(bag.add(mergeColored(parts)), vc);
     m.castShadow = m.receiveShadow = true;
     group.add(m);
   }
 
+  trimShadows(group, quality);
+
   return {
     update(dt: number, time: number) {
       for (const u of updaters) u(dt, time);
+      kit.update(dt, time);
     },
     dispose() {
       disposeGroup(group);

@@ -7,6 +7,7 @@ import type { Vec3 } from '../core/math';
 export type CharacterId = 'dad' | 'mom' | 'bro1' | 'bro2' | 'lupin' | 'grandma';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type TrackTheme = 'chicago' | 'neighborhood' | 'kitchen' | 'dogpark' | 'snow';
+export type SceneryId = TrackTheme | 'sweethome';
 export type SurfaceType = 'road' | 'offroad' | 'ice' | 'mud' | 'milk';
 
 export type ItemId =
@@ -88,6 +89,8 @@ export interface TrackDef {
   id: string;
   name: string;
   theme: TrackTheme;
+  /** Optional scenery set that overrides the theme's default scenery (e.g. a second Chicago track). */
+  scenery?: SceneryId;
   description: string;
   difficulty: 1 | 2 | 3;
   laps: number;

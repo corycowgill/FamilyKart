@@ -1,89 +1,14 @@
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { SceneryContext, SceneryHandle } from './types';
-import { addClouds, Batch, ctxBits, disposeGroup, flagGeometry, flagMaterial, M, mergeColored, PROPS, setInstance, type Spot, unitBox, vcMat, windowedMaterial } from './common';
+import { addClouds, Batch, trimShadows, ctxBits, disposeGroup, flagGeometry, flagMaterial, M, mergeColored, PROPS, setInstance, type Spot, vcMat } from './common';
 import { getField } from './field';
-import { flagTexture, textTexture, windowTexture } from './textures';
+import { flagTexture } from './textures';
+import {
+  aonCenter, ballpark, beefStand, bluesClub, bungalow, pizzeria, popcornShop, windGusts, buildChicagoFlag, CTA, frameHouse, twoFlat, cornerTavern, dibsGeo, elevatedL, faceRoad, findSpot, glassSpireTower, hancockCenter, hotDogStand, Kit, marinaCity, willisTower,
+} from './chicagoLandmarks';
 
 type P = Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>;
-
-/** Window with white frame on a facade at local (x, y), facing +Z at depth z (optionally transformed). */
-function win(parts: P, x: number, y: number, z: number, w = 1.3, h = 1.7, glass = '#2e4a6b', frame = '#f4f1e8', xf?: THREE.Matrix4) {
-  const t = (m: THREE.Matrix4) => (xf ? xf.clone().multiply(m) : m);
-  parts.push([new THREE.BoxGeometry(w + 0.3, h + 0.3, 0.12), frame, t(M.t(x, y, z))]);
-  parts.push([new THREE.BoxGeometry(w, h, 0.16), glass, t(M.t(x, y, z + 0.02))]);
-  parts.push([new THREE.BoxGeometry(w + 0.5, 0.14, 0.35), frame, t(M.t(x, y - h / 2 - 0.15, z + 0.1))]);
-}
-
-/** Chicago two-flat: body tinted by instance color (brick), details untinted. Front faces +Z. */
-function twoFlat(): { body: THREE.BufferGeometry; detail: THREE.BufferGeometry } {
-  const W = 8, H = 8.4, D = 14;
-  const body = mergeColored([
-    [new THREE.BoxGeometry(W, H, D), '#ffffff', M.t(0, H / 2, 0)],
-    [new THREE.BoxGeometry(3.2, H - 0.6, 1.4), '#ffffff', M.t(-1.6, (H - 0.6) / 2, D / 2 + 0.6)], // bay
-  ]);
-  const d: P = [
-    [new THREE.BoxGeometry(W + 0.5, 0.7, D + 0.5), '#e9dcc4', M.t(0, H + 0.1, 0)], // cornice
-    [new THREE.BoxGeometry(W + 0.1, 0.3, D + 0.1), '#d8cab0', M.t(0, H / 2, 0)],
-    [new THREE.BoxGeometry(2.6, 1.2, 2.6), '#cfc6b8', M.t(2.4, 0.6, D / 2 + 1.3)], // stoop
-    [new THREE.BoxGeometry(1.3, 2.4, 0.2), '#5a2f1c', M.t(2.4, 2.4, D / 2 + 0.02)], // door
-    [new THREE.BoxGeometry(3.0, 0.25, 2.2), '#5d4037', M.t(2.4, 3.8, D / 2 + 1.1)], // canopy
-  ];
-  for (const y of [2.6, 6.2]) win(d, -1.6, y, D / 2 + 1.32, 2.2, 1.9);
-  win(d, 2.4, 6.2, D / 2 + 0.02, 1.2, 1.8);
-  for (const side of [-1, 1]) {
-    const xf = new THREE.Matrix4().makeRotationY((side * Math.PI) / 2);
-    for (const z of [-4, 0, 4]) for (const y of [2.6, 6.2]) win(d, z, y, W / 2 + 0.02, 1.1, 1.6, '#2e4a6b', '#f4f1e8', xf);
-  }
-  return { body, detail: mergeColored(d) };
-}
-
-/** Brick bungalow with a hipped roof and porch. */
-function bungalow(): { body: THREE.BufferGeometry; detail: THREE.BufferGeometry } {
-  const W = 9, H = 4.2, D = 13;
-  const body = mergeColored([[new THREE.BoxGeometry(W, H, D), '#ffffff', M.t(0, H / 2, 0)]]);
-  const d: P = [
-    [new THREE.ConeGeometry(Math.hypot(W, D) / 2 + 0.6, 4.2, 4, 1).rotateY(Math.PI / 4), '#4a4f5a', M.trs(0, H + 2.05, 0, 0, 0, 0, W / Math.hypot(W, D) * 1.05, 1, D / Math.hypot(W, D) * 1.05)],
-    [new THREE.BoxGeometry(2.0, 2.2, 1.0), '#ffffff', M.t(0, H + 2.2, 2.5)], // dormer
-    [new THREE.ConeGeometry(1.5, 1.0, 4).rotateY(Math.PI / 4), '#4a4f5a', M.t(0, H + 3.7, 2.5)],
-    [new THREE.BoxGeometry(W - 1, 0.4, 3), '#cfc6b8', M.t(0, 0.6, D / 2 + 1.5)], // porch
-    [new THREE.BoxGeometry(W - 1, 0.25, 3.2), '#e8e1d4', M.t(0, 3.4, D / 2 + 1.5)],
-    [new THREE.BoxGeometry(0.35, 2.8, 0.35), '#f2efe8', M.t(-W / 2 + 0.8, 2.0, D / 2 + 2.8)],
-    [new THREE.BoxGeometry(0.35, 2.8, 0.35), '#f2efe8', M.t(W / 2 - 0.8, 2.0, D / 2 + 2.8)],
-    [new THREE.BoxGeometry(1.2, 2.2, 0.2), '#7a2e1f', M.t(1.8, 1.9, D / 2 + 0.02)],
-  ];
-  win(d, -2.0, 2.2, D / 2 + 0.02, 2.6, 1.6);
-  win(d, 0, 6.6, D / 2 + 3.02 - 2.5 + 0.02, 1.2, 1.0);
-  return { body, detail: mergeColored(d) };
-}
-
-/** Wooden frame house with a gable roof (siding color = instance tint). */
-function frameHouse(): { body: THREE.BufferGeometry; detail: THREE.BufferGeometry } {
-  const W = 7.5, H = 6, D = 12;
-  const gable = new THREE.BufferGeometry();
-  const hw = W / 2, rh = 3.2;
-  gable.setAttribute('position', new THREE.Float32BufferAttribute([-hw, 0, D / 2, hw, 0, D / 2, 0, rh, D / 2, hw, 0, -D / 2, -hw, 0, -D / 2, 0, rh, -D / 2], 3));
-  gable.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(12).fill(0), 2));
-  gable.computeVertexNormals();
-  const body = mergeColored([
-    [new THREE.BoxGeometry(W, H, D), '#ffffff', M.t(0, H / 2, 0)],
-    [gable, '#ffffff', M.t(0, H, 0)],
-  ]);
-  const roofL = new THREE.BoxGeometry(Math.hypot(hw, rh) + 0.6, 0.25, D + 0.8);
-  const ang = Math.atan2(rh, hw);
-  const d: P = [
-    [roofL, '#8b3a2e', M.trs(-hw / 2, H + rh / 2 + 0.1, 0, 0, 0, ang)],
-    [roofL.clone(), '#8b3a2e', M.trs(hw / 2, H + rh / 2 + 0.1, 0, 0, 0, -ang)],
-    [new THREE.BoxGeometry(W + 0.2, 0.3, 0.2), '#ffffff', M.t(0, H, D / 2 + 0.05)],
-    [new THREE.BoxGeometry(1.2, 2.3, 0.2), '#2f4f8f', M.t(-2, 1.7, D / 2 + 0.02)],
-    [new THREE.BoxGeometry(2.8, 0.6, 1.8), '#d8d0c2', M.t(-2, 0.3, D / 2 + 0.9)],
-  ];
-  win(d, 1.6, 2.2, D / 2 + 0.02, 1.6, 1.7);
-  win(d, -1.6, 4.6, D / 2 + 0.02, 1.2, 1.4);
-  win(d, 1.6, 4.6, D / 2 + 0.02, 1.2, 1.4);
-  win(d, 0, 7.2, D / 2 + 0.02, 1.0, 1.0);
-  return { body, detail: mergeColored(d) };
-}
 
 export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
   const { track, group, quality } = ctx;
@@ -97,6 +22,62 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
   const vc = vcMat(bag);
   const vcBody = vcMat(bag, { roughness: 0.85 });
   const b = field.bounds;
+  const kit = new Kit(bag, group, { lit: 0, snow: false, quality });
+  const lo = quality === 'low', hi = quality === 'high';
+  const shirt = ['#e8443a', '#2f7de1', '#ffd23f', '#3ccf6e', '#ffffff', '#ff8a3d', '#b05cf0', '#41B6E6'];
+
+  /* ------------------------------------------------ the L behind the houses, the ballpark, the skyline */
+  for (const l of lm('ltrain')) {
+    elevatedL(kit, placer, {
+      a: [l.x, b.minZ - 110], b: [l.x, b.maxZ + 80],
+      lines: lo ? [CTA.red] : [CTA.red, CTA.purple],
+      cars: lo ? 4 : 6,
+      stations: [{ at: (-150 - (b.minZ - 110)) / (b.maxZ + 80 - (b.minZ - 110)), name: 'ADDISON', color: CTA.red }],
+      period: 22,
+    });
+  }
+  for (const c of lm('ballpark')) {
+    ballpark(kit, c.x, field.height(c.x, c.z), c.z, c.rot ?? 0);
+    placer.reserve(c.x, c.z, 64);
+    // fans streaming toward the marquee
+    if (!lo) for (let i = 0; i < (hi ? 30 : 14); i++) {
+      const a = (c.rot ?? 0) + rng.range(-0.5, 0.5), d = rng.range(60, 74);
+      const x = c.x + Math.sin(a) * d, z = c.z + Math.cos(a) * d;
+      kit.person(x, field.height(x, z), z, a + Math.PI, rng.pick(['#1d3f8f', '#c8102e', '#ffffff', '#1d3f8f']));
+    }
+  }
+  for (const c of lm('skyline')) {
+    // the downtown skyline on the horizon
+    const y0 = -2;
+    willisTower(kit, c.x - 120, y0, c.z + 60, 0.2, 0.95);
+    hancockCenter(kit, c.x + 160, y0, c.z - 40, 0.1, 0.95);
+    glassSpireTower(kit, c.x + 40, y0, c.z + 10, -0.2, 0.9);
+    aonCenter(kit, c.x - 260, y0, c.z + 120, 0, 0.9);
+    marinaCity(kit, c.x + 10, y0, c.z - 120, 0.4, 0.9);
+  }
+  {
+    const p = findSpot(placer, 270, 150, 9, 3, 40);
+    if (p) {
+      bluesClub(kit, p.x, field.height(p.x, p.z), p.z, faceRoad(placer, p.x, p.z));
+      placer.reserve(p.x, p.z, 9);
+    }
+  }
+  for (const c of lm('tavern')) {
+    const p = findSpot(placer, c.x, c.z, 9, 2) ?? c;
+    cornerTavern(kit, p.x, field.height(p.x, p.z), p.z, faceRoad(placer, p.x, p.z));
+    placer.reserve(p.x, p.z, 9);
+  }
+  {
+    const spots = placer.along(0, lo ? 600 : 260, 6, 6.5, { side: 0 });
+    for (const [i, sp] of spots.entries()) {
+      [hotDogStand, pizzeria, hotDogStand, beefStand, popcornShop][i % 5](kit, sp.x, sp.y, sp.z, sp.yaw);
+      if (!lo) for (let k = 0; k < (hi ? 3 : 2); k++) {
+        const lx = -1.6 + k * 1.6, lz = 4.2;
+        const cx = sp.x + Math.cos(sp.yaw) * lx + Math.sin(sp.yaw) * lz, cz = sp.z - Math.sin(sp.yaw) * lx + Math.cos(sp.yaw) * lz;
+        kit.person(cx, field.height(cx, cz), cz, sp.yaw + Math.PI, rng.pick(shirt));
+      }
+    }
+  }
 
   /* ------------------------------------------------ landmarks first (reserve space) */
   const lmParts: P = [];
@@ -219,17 +200,37 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
   const types = [twoFlat(), bungalow(), frameHouse()];
   const bodyB = types.map((t) => new Batch(bag.add(t.body), vcBody, { name: 'houseBody' }));
   const detB = types.map((t) => new Batch(bag.add(t.detail), vc, { name: 'houseDetail' }));
+  // far houses: same silhouette, fewer window boxes
+  const farTF = twoFlat(true);
+  bag.add(farTF.body);
+  detB.push(new Batch(bag.add(farTF.detail), vc, { name: 'houseDetailFar' }));
   const brick = ['#b5523b', '#a8452f', '#c96f4a', '#d9a36a', '#9c3f2c', '#e0b98a', '#b86a50'];
+  const greystone = ['#bdb7aa', '#cfc8b8', '#a9a397', '#d8d2c2'];
   const siding = ['#8fc1e3', '#f7d774', '#a8e0c2', '#f4a7a0', '#ffffff', '#c3b1e1'];
-  const addHouse = (s: Spot) => {
+  // porch flags: Chicago (mostly) and US flags on little angled poles
+  const porchPole = kit.batch(mergeColored([[new THREE.CylinderGeometry(0.04, 0.04, 2.2, 5), '#e0e0e0', M.trs(0, 0.8, 0.75, 0.75, 0, 0)]]), vc, { cast: false, name: 'porchPoles' });
+  const chiTex = bag.add(flagTexture('chicago')), usaTex = bag.add(flagTexture('usa'));
+  const porchChi = kit.batch(flagGeometry(1.5, 1.0), flagMaterial(bag, chiTex, timeU), { cast: false, name: 'porchFlagsChi' });
+  const porchUsa = kit.batch(flagGeometry(1.5, 1.0), flagMaterial(bag, usaTex, timeU), { cast: false, name: 'porchFlagsUsa' });
+  const front: Array<[number, number, number]> = [[3.7, 4.6, 7.2], [4.2, 3.3, 9.6], [3.5, 4.6, 6.2]];
+  const addHouse = (s: Spot, near: boolean) => {
     const t = rng.int(3);
-    const col = t === 2 ? rng.pick(siding) : rng.pick(brick);
+    const col = t === 2 ? rng.pick(siding) : t === 0 && rng.chance(0.4) ? rng.pick(greystone) : rng.pick(brick);
     bodyB[t].add(s.x, s.y, s.z, s.yaw, 1, 1, 1, col);
-    detB[t].add(s.x, s.y, s.z, s.yaw, 1, 1, 1);
+    detB[t === 0 && !near ? 3 : t].add(s.x, s.y, s.z, s.yaw, 1, 1, 1);
+    if (near && !lo && rng.chance(0.4)) {
+      const [lx, ly, lz] = front[t];
+      const cs = Math.cos(s.yaw), sn = Math.sin(s.yaw);
+      const wx = s.x + cs * lx + sn * lz, wz = s.z - sn * lx + cs * lz;
+      porchPole.add(wx, s.y + ly, wz, s.yaw);
+      // tip of the angled pole
+      const tx = wx + sn * 1.5, tz = wz + cs * 1.5;
+      (rng.chance(0.75) ? porchChi : porchUsa).add(tx, s.y + ly + 1.6, tz, s.yaw + Math.PI / 2, 1, 1, 1);
+    }
   };
   for (let p = 0; p < track.paths.length; p++) {
     const off = p === 0 ? 14 : 13;
-    for (const s of placer.along(p, 15, off, 7.5, { jitter: 1.5 })) addHouse(s);
+    for (const s of placer.along(p, 15, off, 7.5, { jitter: 1.5 })) addHouse(s, true);
   }
   // fill the blocks beyond with more houses on a loose grid
   const fillRect = { minX: b.minX - 125, maxX: b.maxX + 125, minZ: b.minZ - 125, maxZ: b.maxZ + 125 };
@@ -239,7 +240,7 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
       const jx = x + rng.range(-2, 2), jz = z + rng.range(-2, 2);
       if (!placer.ok(jx, jz, 8, 22)) continue;
       placer.reserve(jx, jz, 8);
-      addHouse({ x: jx, y: field.height(jx, jz), z: jz, yaw: (Math.floor(z / 26) % 2 ? 0 : Math.PI) + rng.range(-0.03, 0.03) });
+      addHouse({ x: jx, y: field.height(jx, jz), z: jz, yaw: (Math.floor(z / 26) % 2 ? 0 : Math.PI) + rng.range(-0.03, 0.03) }, false);
     }
   }
   bodyB.forEach((bb) => bb.build(group));
@@ -262,8 +263,12 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
 
     const cars = new Batch(bag.add(PROPS.car()), vcMat(bag, { roughness: 0.35, metalness: 0.25 }), { name: 'parkedCars' });
     const carCols = ['#e8443a', '#2f7de1', '#f5f5f5', '#222831', '#ffd23f', '#3ccf6e', '#9aa5b1', '#ff8a3d', '#6b4cd6'];
+    const dibs = kit.batch(dibsGeo(), kit.tintMat, { name: 'dibs', cast: false });
     for (const s of placer.along(0, 13, 6.2, 2.4, { jitter: 0.3 })) {
-      if (rng.chance(0.35)) continue;
+      if (rng.chance(0.35)) {
+        if (rng.chance(0.4)) dibs.add(s.x, s.y, s.z, s.yaw + rng.range(-0.5, 0.5), 1.2, 1.2, 1.2, rng.pick(['#3aa8ff', '#ff5a5a', '#3ccf6e', '#ffd23f', '#ff8ad8']));
+        continue;
+      }
       cars.add(s.x, s.y, s.z, s.yaw + Math.PI / 2 + (rng.chance(0.5) ? Math.PI : 0), 1, 1, 1, rng.pick(carCols));
     }
     cars.build(group);
@@ -315,13 +320,6 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
     fa.build(group);
     fb.build(group);
 
-    const tex = bag.add(windowTexture({ wall: '#e9e9ef', glass: '#6f8fb3', glass2: '#9cb8d6', seed: 61 }));
-    const city = new Batch(bag.add(unitBox()), windowedMaterial(bag, tex, 12, 14, { fog: true }), { cast: false, receive: false });
-    for (let i = 0; i < 40; i++) {
-      const x = b.maxX + rng.range(500, 700), z = rng.range(b.minZ - 200, b.maxZ + 200);
-      city.add(x, -1, z, 0, rng.range(20, 40), rng.range(60, 220), rng.range(20, 40), rng.pick(['#dfe8f5', '#f5e6cc', '#cfd8e8', '#ffffff']));
-    }
-    city.build(group);
   }
 
   /* ------------------------------------------------ street name signs at the corners */
@@ -340,15 +338,10 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
       }
       placer.reserve(x, z, 1);
       const y = field.height(x, z);
-      const t = bag.add(textTexture(names[k++ % names.length], { w: 512, h: 96, bg: '#1d6b3a', fg: '#ffffff', border: '#ffffff' }));
-      const sign = new THREE.Mesh(bag.add(new THREE.PlaneGeometry(3.2, 0.6)), bag.add(new THREE.MeshStandardMaterial({ map: t, side: THREE.DoubleSide })));
-      sign.position.set(x, y + 4.2, z);
-      sign.rotation.y = Math.atan2(smp.tx, smp.tz) + Math.PI / 2;
-      group.add(sign);
-      const pole = new THREE.Mesh(bag.add(new THREE.CylinderGeometry(0.07, 0.07, 4.6, 6)), vc);
-      paintOnce(pole.geometry, '#5a5f66');
-      pole.position.set(x, y + 2.3, z);
-      group.add(pole);
+      const r = kit.paint.text(names[k++ % names.length], 384, 72, { bg: '#1d6b3a', fg: '#ffffff', border: '#ffffff' });
+      const yaw = Math.atan2(smp.tx, smp.tz) + Math.PI / 2;
+      kit.paint.quad(r, 3.2, 0.6, M.trs(x, y + 4.2, z, 0, yaw, 0), true);
+      kit.solid.push([new THREE.CylinderGeometry(0.07, 0.07, 4.6, 6), '#5a5f66', M.t(x, y + 2.3, z)]);
       s += 60;
     }
   }
@@ -377,22 +370,24 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
   }
   updaters.push(addClouds(ctx, bag, quality === 'low' ? 10 : 20, [140, 230], 1200, '#fff8ee', 9));
 
+  {
+    const flags = buildChicagoFlag(kit, 0.9);
+    for (const sp of placer.along(0, lo ? 300 : 150, 3, 1)) flags.add(sp.x, sp.y, sp.z);
+  }
+  if (!lo) windGusts(kit, ['#e0882c', '#f2b13c', '#c94a2a', '#7cc65a', '#d9a63a'], hi ? 380 : 180, { speed: 8 });
+  kit.flush();
+
+  trimShadows(group, quality);
+
   return {
     update(dt: number, time: number) {
       timeU.value = time;
       for (const u of updaters) u(dt, time);
+      kit.update(dt, time);
     },
     dispose() {
       disposeGroup(group);
       bag.dispose();
     },
   };
-}
-
-function paintOnce(g: THREE.BufferGeometry, color: string): void {
-  const c = new THREE.Color(color);
-  const n = g.attributes.position.count;
-  const arr = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) arr.set([c.r, c.g, c.b], i * 3);
-  g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
 }

@@ -11,7 +11,8 @@ import { AIDriver, AI_DIFFICULTY } from '../sim/ai/AIDriver';
 import type { ItemId } from '../sim/types';
 import type { RacerConfig, RaceResult } from '../sim/race/RaceSim';
 import type { CharacterId, Difficulty, KartInput, SimEvent, TrackDef } from '../sim/types';
-import { h, ordinal } from '../ui/dom';
+import { CTA, type CtaLine, flagSvg, confettiHtml, lineBullet, starRow, starSvg, stationFor } from '../ui/chicagoArt';
+import { esc, h, ordinal } from '../ui/dom';
 import { FastTap } from '../ui/FastTap';
 import { HUD } from '../ui/HUD';
 import { Portraits } from '../ui/Portraits';
@@ -22,16 +23,44 @@ type Mode = 'quick' | 'versus' | 'grandprix' | 'timetrial';
 type Stage = { frame(dt: number): void; dispose(): void } | null;
 
 const GP_POINTS = [15, 12, 10, 8, 6, 4];
-const TIPS = [
-  'Hold DRIFT while steering through corners — release when the sparks turn purple for an Ultra Mini-Turbo!',
-  'Grandma looks sweet. She is not.',
-  'Lupin drops tennis balls behind him. Do not chase the tennis balls.',
-  'Racers further back get stronger items — never give up!',
-  'Each family member has a signature special — press F when the meter is READY.',
-  'Look for hidden shortcuts. Bro 2 always does.',
-  'A Bubble Shield blocks one attack. Mom never leaves home without one.',
-  'Drive through boost pads for a free burst of speed.',
+/** Loading-screen cards: [heading, text]. Racing tips mixed with Chicago fun facts and jokes. */
+const TIPS: Array<[string, string]> = [
+  ['Racing tip', 'Hold DRIFT while steering through corners — let go when the sparks turn purple for an Ultra Mini-Turbo!'],
+  ['Racing tip', 'Racers further back get stronger items — never give up!'],
+  ['Racing tip', 'Each family member has a signature special — use it when the meter says READY.'],
+  ['Racing tip', 'Look for hidden shortcuts. Bro 2 always does.'],
+  ['Racing tip', 'A Bubble Shield blocks one attack. Mom never leaves home without one.'],
+  ['Racing tip', 'Drive through boost pads for a free burst of speed.'],
+  ['Family fact', 'Grandma looks sweet. She is not.'],
+  ['Family fact', 'Lupin drops tennis balls behind him. Do not chase the tennis balls.'],
+  ['Chicago fun fact', 'Chicago is called the Windy City. Hold on to your hat — and your steering wheel!'],
+  ['Chicago fun fact', 'Every spring the Chicago River is dyed bright green. Fish say it is "very festive".'],
+  ['Chicago fun fact', 'Chicago has two seasons: winter and construction. Watch out for potholes!'],
+  ['Chicago fun fact', 'A Chicago hot dog gets mustard, relish, onions, tomato, a pickle, sport peppers and celery salt. Never ketchup!'],
+  ['Chicago fun fact', 'Deep dish or thin crust? The family has been arguing about it since 1987.'],
+  ['Chicago fun fact', 'In Chicago it is "pop", not "soda". That is why the Turbo Pop is so fizzy.'],
+  ['Chicago fun fact', 'The Bean is a giant shiny sculpture downtown. Wave at your reflection when you drive by!'],
+  ['Chicago fun fact', 'Chicago is the home of house music, the blues and some very serious jazz. Turn the music up!'],
+  ['Chicago fun fact', 'Lake effect snow can bury a car in an hour. Luckily karts are very good at snow.'],
+  ['Chicago fun fact', 'Shoveled out a parking spot? Put a lawn chair in it. That is called "dibs" and it is the law (sort of).'],
+  ['Chicago fun fact', 'The "L" trains run on tracks high above the streets. Ding-dong — doors closing!'],
+  ['Chicago fun fact', 'Cheese popcorn mixed with caramel popcorn is a Chicago thing. Sweet AND salty, like Grandma.'],
+  ['Chicago fun fact', 'An Italian beef sandwich should be "dipped". Your kart should not.'],
+  ['Chicago fun fact', 'The Chicago River flows backwards! Engineers reversed it in 1900 so it runs away from the lake.'],
+  ['Chicago fun fact', 'The very first Ferris wheel was built for the 1893 World\'s Fair in Chicago.'],
+  ['Chicago fun fact', 'The world\'s first skyscraper went up in Chicago in 1885. It was only 10 stories tall!'],
+  ['Chicago fun fact', 'The "L" has been rattling over Chicago since 1892. Ding-dong!'],
+  ['Chicago fun fact', 'Chicago has 77 neighborhoods (officially "community areas"). Pick your favorite track!'],
+  ['Chicago fun fact', 'Chicago has about 26 miles of lakefront — that is a lot of beach for a city in the middle of the country.'],
+  ['Chicago fun fact', 'Some say "Windy City" was about long-winded politicians, not the weather. The wind does not agree.'],
+  ['Chicago fun fact', 'Blues musicians moved to Chicago, plugged in electric guitars and invented the Chicago blues sound.'],
+  ['Chicago fun fact', 'House music got its name from a Chicago dance club called the Warehouse. Win a race and you will hear the house party!'],
+  ['Chicago fun fact', 'Deep dish pizza was invented in Chicago in the 1940s. It is basically a pizza casserole and we love it.'],
+  ['Sweet Home Chicago', 'Lake Michigan is so big you cannot see the other side. It is basically an ocean with no sharks.'],
+  ['Chicago fun fact', 'In Chicago everybody gets a "Da". Da Dad. Da Mom. Da Grandma. Da Lupin. Da Family!'],
 ];
+/** The family's main-menu signs, one CTA line each. */
+const LOGO_HTML = `<span class="l1">FAMILY</span><span class="l2"><span class="flag">${starSvg('', CTA.red, '#fff')}</span> KART RACING <span class="flag">${starSvg('', CTA.red, '#fff')}</span></span><span class="l3">${starRow(2)}<span class="sweet">Sweet Home Chicago!</span>${starRow(2)}</span>`;
 
 interface GPState {
   cup: { id: string; name: string; tracks: string[] };
@@ -217,13 +246,22 @@ export class Game {
     return b;
   }
 
+  /** A menu button dressed as a CTA "L" line sign: coloured line bullet, sign lettering, line stripe. */
+  private ctaBtn(label: string, line: CtaLine, icon: string, sub: string, cls: string, onClick: () => void, testid?: string): HTMLButtonElement {
+    const b = this.btn(label, `cta ${cls}`, onClick, testid);
+    b.style.setProperty('--line', CTA[line]);
+    b.innerHTML = `${lineBullet(line, icon)}<span class="cta-label">${esc(label)}</span><span class="cta-sub">${esc(sub)}</span>`;
+    return b;
+  }
+
   showTitle(): void {
     this.setStage(null);
     const el = h('div', { class: 'title-screen' },
       h('div', { class: 'vignette' }),
-      h('div', { class: 'logo', html: '<span class="l1">FAMILY</span><span class="l2"><span class="flag">🏁</span> KART RACING <span class="flag">🏁</span></span>' }),
+      h('div', { class: 'logo', html: LOGO_HTML }),
       h('div', { class: 'press-start' }, '', h('span', { class: 'kb-only' }, 'Press any key or click to start'), h('span', { class: 'pad-only' }, 'Press Ⓐ to start'), h('span', { class: 'touch-only' }, 'Tap to start')),
-      h('div', { class: 'footer-hint' }, 'Dad · Mom · Bro 1 · Bro 2 · Lupin · Grandma'),
+      h('div', { class: 'title-tagline' }, 'All aboard for the Windy City!'),
+      h('div', { class: 'footer-hint' }, 'Dad · Mom · Bro 1 · Bro 2 · Lupin · Grandma — made in the Windy City'),
     );
     const go = (e?: Event) => {
       this.titleGo = null;
@@ -245,19 +283,20 @@ export class Game {
     if (!this.attract) void this.startAttract();
     audio.startMusic('menu');
     const t = this.save.data.totals;
-    const el = h('div', { class: 'title-screen' },
+    const el = h('div', { class: 'title-screen menu-screen' },
       h('div', { class: 'vignette' }),
-      h('div', { class: 'logo', html: '<span class="l1">FAMILY</span><span class="l2"><span class="flag">🏁</span> KART RACING <span class="flag">🏁</span></span>' }),
+      h('div', { class: 'logo', html: LOGO_HTML }),
       h('div', { class: 'menu-list' },
-        this.btn('Quick Race', '', () => this.beginMode('quick'), 'btn-quick-race'),
-        this.btn('Grand Prix', 'yellow', () => this.beginMode('grandprix'), 'btn-grand-prix'),
-        this.btn('Time Trial', 'blue', () => this.beginMode('timetrial'), 'btn-time-trial'),
-        this.btn('2-Player Versus', 'purple', () => this.beginMode('versus'), 'btn-versus'),
+        this.ctaBtn('Quick Race', 'red', '🏁', 'Red Line', '', () => this.beginMode('quick'), 'btn-quick-race'),
+        this.ctaBtn('Grand Prix', 'purple', '🏆', 'Purple Line', '', () => this.beginMode('grandprix'), 'btn-grand-prix'),
+        this.ctaBtn('Time Trial', 'blue', '⏱️', 'Blue Line', '', () => this.beginMode('timetrial'), 'btn-time-trial'),
+        this.ctaBtn('2-Player Versus', 'pink', '🎮', 'Pink Line', '', () => this.beginMode('versus'), 'btn-versus'),
         h('div', { class: 'btn-row' },
-          this.btn('Garage', 'green small', () => this.showGarage(), 'btn-garage'),
-          this.btn('Settings', 'gray small', () => this.showSettings(), 'btn-settings')),
+          this.ctaBtn('Garage', 'brown', '🔧', 'Brown Line', 'small', () => this.showGarage(), 'btn-garage'),
+          this.ctaBtn('Settings', 'green', '⚙️', 'Green Line', 'small', () => this.showSettings(), 'btn-settings')),
       ),
       h('div', { class: 'corner-stats' }, `Races: ${t.races} · Wins: ${t.wins}`),
+      h('div', { class: 'made-in', html: `${flagSvg()}Made in the Windy City` }),
       h('div', { class: 'footer-hint' }, h('span', { class: 'kb-only' }, 'Mouse, keyboard (arrows + Enter) or Xbox controller'), h('span', { class: 'pad-only' }, '🎮 Controller connected · D-pad / stick to move · Ⓐ select · Ⓑ back'), h('span', { class: 'touch-only' }, 'Race with on-screen controls: slide to steer, hold DRIFT in corners')),
     );
     el.querySelector<HTMLElement>('.menu-list .btn')?.setAttribute('data-autofocus', '');
@@ -353,9 +392,11 @@ export class Game {
       const rec = this.save.data.records[t.id];
       const canvas = h('canvas', { width: 320, height: 200 });
       drawTrackPreview(canvas, t);
-      const card = h('button', { class: `track-card${t.id === this.trackId ? ' selected' : ''}`, 'data-nav': true, 'data-testid': `track-${t.id}` },
+      const st = stationFor(t.theme);
+      const card = h('button', { class: `track-card${t.id === this.trackId ? ' selected' : ''}`, 'data-nav': true, 'data-testid': `track-${t.id}`, style: `--line:${CTA[st.line]}` },
         canvas,
         h('div', { class: 'tc-body' },
+          h('div', { class: 'tc-line', html: `${lineBullet(st.line, '★')}<span class="ln">${st.lineName}</span><span class="ns">› <b>${esc(st.stop)}</b></span>` }),
           h('h3', {}, t.name),
           h('div', { class: 'meta' }, h('span', { class: 'stars' }, '★'.repeat(t.difficulty) + '☆'.repeat(3 - t.difficulty)), h('span', {}, `${t.laps} laps`)),
           h('div', { class: 'meta' }, h('span', {}, `Best lap ${formatTime(rec?.bestLap)}`), h('span', {}, `Race ${formatTime(rec?.bestRace)}`))));
@@ -372,7 +413,7 @@ export class Game {
     }
     el.append(
       h('div', { class: 'screen-title' }, tt ? 'Time Trial: Pick a Track' : 'Pick a Track'),
-      h('div', { class: 'screen-sub' }, tt ? 'Race alone against the clock (and your ghost!)' : `${characterById(this.players[0]).name}${this.players[1] ? ' vs ' + characterById(this.players[1]).name : ''} — choose where to race`),
+      h('div', { class: 'screen-sub' }, tt ? 'Race alone against the clock (and your ghost!)' : `${characterById(this.players[0]).name}${this.players[1] ? ' vs ' + characterById(this.players[1]).name : ''} — pick your neighborhood!`),
     );
     if (!tt) el.append(this.difficultyPicker());
     el.append(grid, h('div', { class: 'options-row' }, this.btn('Back', 'gray small', () => this.showCharacterSelect(this.mode === 'versus' ? 1 : 0), 'btn-back')));
@@ -407,13 +448,15 @@ export class Game {
     for (const cup of CUPS) {
       const best = this.save.data.cups[cup.id];
       const names = cup.tracks.map((id) => TRACKS.find((t) => t.id === id)?.name ?? id).join(' · ');
-      const b = this.btn(`${cup.name}${best ? `  ${best.bestPlace === 1 ? '🏆' : best.bestPlace <= 3 ? '🥈' : ''}` : ''}`, 'yellow', () => {
+      const frosty = /frost|snow|winter/i.test(cup.id + cup.name);
+      const b = this.ctaBtn(`${cup.name}${best ? `  ${best.bestPlace === 1 ? '🏆' : best.bestPlace <= 3 ? '🥈' : ''}` : ''}`, frosty ? 'blue' : 'red', frosty ? '❄️' : '🌬️', `${cup.tracks.length} stops`, '', () => {
         this.gp = { cup, race: 0, points: new Map(), lastResults: [] };
         this.showCharacterSelect(0);
       }, `cup-${cup.id}`);
-      list.append(b, h('div', { class: 'screen-sub', style: 'margin:-6px 0 8px' }, names));
+      b.style.minWidth = 'min(420px, 90vw)';
+      list.append(b, h('div', { class: 'cup-names' }, names));
     }
-    el.append(h('div', { class: 'screen-title' }, 'Grand Prix'), h('div', { class: 'screen-sub' }, 'Four races. Points for every finish. One family champion.'), this.difficultyPicker(), list,
+    el.append(h('div', { class: 'screen-title' }, 'Grand Prix'), h('div', { class: 'screen-sub' }, 'Four races. Points for every finish. One family champion of Chicagoland.'), this.difficultyPicker(), list,
       h('div', { class: 'options-row' }, this.btn('Back', 'gray small', () => this.showMainMenu(), 'btn-back')));
     this.show('cup', el);
   }
@@ -438,9 +481,15 @@ export class Game {
     const raceDef: TrackDef = this.testFlags.laps ? { ...def, laps: this.testFlags.laps } : def;
     // loading screen
     const bar = h('div');
-    const label = h('div', { class: 'tip' }, TIPS[Math.floor(Math.random() * TIPS.length)]);
+    const [tipHead, tipText] = TIPS[Math.floor(Math.random() * TIPS.length)];
+    const label = h('div', { class: 'tip' }, h('b', {}, `★ ${tipHead}`), tipText);
+    const st = stationFor(def.theme);
     const loading = h('div', { class: 'loading-screen', style: 'background-image:url(poster.jpg)' },
-      h('div', { class: 'loading-box' }, h('h2', {}, def.name), label, h('div', { class: 'boot-bar' }, bar)));
+      h('div', { class: 'loading-box arrival', style: `--line:${CTA[st.line]}` },
+        h('div', { class: 'arr-head', html: `${lineBullet(st.line, '★')}${st.lineName} · Now arriving` }),
+        h('h2', {}, def.name),
+        h('div', { class: 'arr-stop' }, `Next stop: ${st.stop}`),
+        label, h('div', { class: 'boot-bar' }, bar)));
     this.show('loading', loading);
     this.setStage(null);
     this.stopAttract();
@@ -548,7 +597,7 @@ export class Game {
     });
     const winner = results[0];
     const panel = h('div', { class: 'results panel', 'data-testid': 'results' },
-      h('h2', {}, tt ? 'Time Trial' : this.gp ? `${this.gp.cup.name} — Race ${this.gp.race + 1}/4` : 'Race Results'),
+      h('h2', { class: 'marquee' }, tt ? 'Time Trial' : this.gp ? `${this.gp.cup.name} — Race ${this.gp.race + 1}/4` : 'Race Results'),
       h('div', { class: 'screen-sub', style: 'margin:0 0 6px' }, def.name),
       h('div', { class: 'records' }, records.join(' ')),
       table);
@@ -563,8 +612,10 @@ export class Game {
         this.btn('Main Menu', 'gray', () => this.backToMenu(), 'btn-main-menu'));
     }
     panel.append(row);
-    const el = h('div', { class: 'pass-through' }, panel,
-      h('div', { class: 'winner-banner' }, tt ? `${formatTime(winner.time)}` : `${characterById(winner.character).name} wins!`));
+    const humanWon = results.some((r) => r.isHuman && r.place === 1);
+    const tag = tt ? 'New stop on the clock!' : humanWon ? 'Sweet win, Chicago!' : results.some((r) => r.isHuman && r.place <= 3) ? 'Chicago proud — podium!' : 'Next train: a rematch!';
+    const el = h('div', { class: 'pass-through' }, h('div', { html: confettiHtml(humanWon || tt ? 28 : 14) }), panel,
+      h('div', { class: 'winner-banner', html: `${esc(tt ? formatTime(winner.time) : `${characterById(winner.character).name} wins!`)}<small>${starSvg('chi-star', '#fff')} ${tag}</small>` }));
     this.show('results', el);
   }
 
@@ -581,7 +632,7 @@ export class Game {
         h('td', {}, `${gp.points.get(id) ?? 0} pts`)));
     });
     const panel = h('div', { class: 'results panel' },
-      h('h2', {}, last ? `${gp.cup.name} Champion!` : `Standings after ${gp.race + 1}/4`), table);
+      h('h2', { class: 'marquee' }, last ? `${gp.cup.name} Champion!` : `Standings after ${gp.race + 1}/4`), table);
     const row = h('div', { class: 'btn-row' });
     if (last) {
       const place = standings.indexOf(this.players[0]) + 1;
@@ -603,7 +654,8 @@ export class Game {
       }));
     }
     panel.append(row);
-    this.show('standings', h('div', { class: 'pass-through' }, panel, last ? h('div', { class: 'winner-banner' }, `🏆 ${characterById(standings[0]).name}`) : null));
+    this.show('standings', h('div', { class: 'pass-through' }, last ? h('div', { html: confettiHtml(28) }) : null, panel,
+      last ? h('div', { class: 'winner-banner', html: `🏆 ${esc(characterById(standings[0]).name)}<small>${starSvg('chi-star', '#fff')} Champion of Chicagoland!</small>` }) : null));
   }
 
   /* ------------------------------------------------------------------ pause */
@@ -630,7 +682,7 @@ export class Game {
         this.input.setSplitScreen(false);
         this.backToMenu();
       }, 'btn-quit'));
-    this.pauseEl = h('div', { class: 'modal-bg', 'data-testid': 'pause-menu' }, h('div', { class: 'modal panel' }, h('h2', {}, 'Paused'), list));
+    this.pauseEl = h('div', { class: 'modal-bg', 'data-testid': 'pause-menu' }, h('div', { class: 'modal panel' }, h('h2', {}, 'Paused'), h('div', { class: 'modal-sub', html: `${starSvg('chi-star')} This train is standing by ${starSvg('chi-star')}` }), list));
     this.ui.append(this.pauseEl);
     list.querySelector('button')?.focus();
   }
@@ -666,7 +718,7 @@ export class Game {
       cards.append(card);
     }
     this.show('garage', h('div', { class: 'char-screen' },
-      h('div', { class: 'char-top' }, h('div', { class: 'screen-title' }, 'The Family Garage'), h('div', { class: 'screen-sub' }, 'Drag to spin the karts')),
+      h('div', { class: 'char-top' }, h('div', { class: 'screen-title' }, 'The Family Garage'), h('div', { class: 'screen-sub' }, 'Drag to spin the karts · built tough for Chicago potholes')),
       info, recs,
       h('div', {}, cards, h('div', { class: 'btn-row' }, this.btn('Back', 'gray small', () => this.backToMenu(), 'btn-back')))));
     refresh();

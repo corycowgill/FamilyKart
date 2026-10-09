@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { TRACKS, trackById } from '../data/tracks';
 import { Environment } from '../render/Environment';
-import { SCENERY } from '../render/scenery';
+import { sceneryFor } from '../render/scenery';
 import { buildTrackView } from '../render/track/TrackView';
 import { Track } from '../sim/track/Track';
 
@@ -70,7 +70,7 @@ let scenery: { update(dt: number, t: number): void; dispose?(): void } | null = 
 const sceneryGroup = new THREE.Group();
 scene.add(sceneryGroup);
 const t0 = performance.now();
-SCENERY[def.theme]()
+sceneryFor(def)()
   .then((build) => {
     scenery = build({ track, group: sceneryGroup, quality });
     if (params.get('rebuild') === '1') {

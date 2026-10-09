@@ -42,6 +42,25 @@ function brass(c: SfxCtx, start: number, notes: number[], dur: number, vol: numb
   }
 }
 
+/** Two-tone "ding-dong" like the chime on a Chicago L train before the doors close. */
+function doorChime(c: SfxCtx, start: number, hi: number, lo: number, vol: number, gap = 0.32): number {
+  for (const [m, s, d] of [[hi, 0, 0.7], [lo, gap, 1.1]] as Array<[number, number, number]>) {
+    const t = c.t + start + s;
+    fm(c.ctx, c.out, { freq: N(m, c.p), ratio: 2, index: 0.7, indexTo: 0.05, t, dur: d, vol });
+    tone(c.ctx, c.out, { type: 'sine', freq: N(m, c.p), t, dur: d, vol: vol * 0.7 });
+    tone(c.ctx, c.out, { type: 'sine', freq: N(m + 12, c.p), t, dur: d * 0.4, vol: vol * 0.15 });
+  }
+  return start + gap + 1.1;
+}
+
+/** Cartoon car horn: two detuned reedy tones a major third apart through a "horn" band-pass. */
+function horn(c: SfxCtx, start: number, dur: number, vol: number): void {
+  for (const f of [392, 494]) {
+    tone(c.ctx, c.out, { type: 'sawtooth', freq: f * c.p, t: c.t + start, dur, vol, shape: 'asr', attack: 0.008, release: 0.03, filter: 'bandpass', cutoff: 1300, q: 1.4 });
+    tone(c.ctx, c.out, { type: 'square', freq: f * c.p * 1.004, t: c.t + start, dur, vol: vol * 0.4, shape: 'asr', attack: 0.008, release: 0.03, filter: 'lowpass', cutoff: 1800 });
+  }
+}
+
 function crash(c: SfxCtx, start: number, vol: number, dur = 1.2): void {
   noise(c.ctx, c.out, { t: c.t + start, dur, vol, filter: 'highpass', cutoff: 5000, q: 0.5 });
 }
@@ -76,17 +95,20 @@ const recipes: Record<SfxName, Recipe> = {
     return 0.85;
   },
   lap: (c) => {
-    [84, 88, 91, 96].forEach((m, i) =>
-      fm(c.ctx, c.out, { freq: N(m, c.p), ratio: 2, index: 1.2, t: c.t + i * 0.07, dur: 0.6, vol: 0.12 }));
-    return 0.85;
+    // L-train door chime "ding-dong" + a little sparkle
+    const end = doorChime(c, 0, 88, 84, 0.13, 0.26);
+    sparkle(c, 0.02, [96, 100], 0.05, 0.035);
+    return end;
   },
   finalLap: (c) => {
-    brass(c, 0, [67, 72, 76], 0.1, 0.32);
-    brass(c, 0.13, [67, 72, 76], 0.1, 0.32);
-    brass(c, 0.26, [72, 76, 79, 84], 0.65, 0.36);
-    tone(c.ctx, c.out, { type: 'triangle', freq: N(48, c.p), t: c.t + 0.26, dur: 0.6, vol: 0.2 });
-    crash(c, 0.26, 0.1);
-    return 1.2;
+    // platform announcement two-tone (twice), then the brass "last stop!" hit
+    doorChime(c, 0, 81, 76, 0.1, 0.16);
+    brass(c, 0.42, [67, 72, 76], 0.1, 0.3);
+    brass(c, 0.55, [67, 72, 76], 0.1, 0.3);
+    brass(c, 0.68, [72, 76, 79, 84], 0.65, 0.34);
+    tone(c.ctx, c.out, { type: 'triangle', freq: N(48, c.p), t: c.t + 0.68, dur: 0.6, vol: 0.2 });
+    crash(c, 0.68, 0.1);
+    return 1.6;
   },
   finish: (c) => {
     [72, 76, 79].forEach((m, i) => brass(c, i * 0.12, [m, m + 12], 0.1, 0.25));
@@ -245,9 +267,12 @@ const recipes: Record<SfxName, Recipe> = {
     return 0.2;
   },
   bump: (c) => {
-    fm(c.ctx, c.out, { freq: 620 * c.p, to: 330 * c.p, ratio: 1.4, index: 2, t: c.t, dur: 0.16, vol: 0.28 });
+    // a soft thunk and a quick "meep-meep" city car horn
     tone(c.ctx, c.out, { type: 'sine', freq: 160 * c.p, to: 80 * c.p, t: c.t, dur: 0.1, vol: 0.25 });
-    return 0.18;
+    fm(c.ctx, c.out, { freq: 520 * c.p, to: 330 * c.p, ratio: 1.4, index: 1.5, t: c.t, dur: 0.1, vol: 0.12 });
+    horn(c, 0.03, 0.07, 0.07);
+    horn(c, 0.13, 0.09, 0.07);
+    return 0.26;
   },
   wall: (c) => {
     tone(c.ctx, c.out, { type: 'sine', freq: 95 * c.p, to: 38 * c.p, glideTime: 0.15, t: c.t, dur: 0.22, vol: 0.6 });
@@ -314,6 +339,11 @@ const recipes: Record<SfxName, Recipe> = {
     }
     for (let i = 0; i < 12; i++) {
       noise(c.ctx, c.out, { t: c.t + 0.3 + i * 0.11 + (i % 2) * 0.04, dur: 0.03, vol: 0.06, filter: 'bandpass', cutoff: 2500, q: 2 }); // claps
+    }
+    // a few rising crowd "woo!"s
+    for (let i = 0; i < 4; i++) {
+      const f0 = (260 + i * 70) * c.p;
+      formantVoice(c.ctx, c.out, { t: c.t + 0.15 + i * 0.27, dur: 0.5, vol: 0.12, f0, f0To: f0 * 1.45, f1: 320, f1To: 420, f2: 800, f2To: 950, breath: 0.02, attack: 0.05 });
     }
     return 2.6;
   },

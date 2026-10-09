@@ -1,6 +1,15 @@
 :root {
   --font-display: 'Lilita One', 'Baloo 2', 'Arial Rounded MT Bold', 'Trebuchet MS', sans-serif;
   --font-body: 'Baloo 2', 'Arial Rounded MT Bold', 'Trebuchet MS', sans-serif;
+  /* CTA station-sign lettering */
+  --font-sign: 'Oswald', 'Roboto Condensed', 'Arial Narrow', 'Helvetica Neue', Arial, sans-serif;
+  /* Chicago flag + CTA "L" palette */
+  --chi-red: #e4002b;
+  --chi-blue: #41b6e6;
+  --cta-dark: #22272f;
+  --cta-darker: #15181e;
+  --star: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 108 108'%3E%3Cpath d='M50,0L60.5,31.8L93.3,25L71,50L93.3,75L60.5,68.2L50,100L39.5,68.2L6.7,75L29,50L6.7,25L39.5,31.8Z' fill='%23E4002B' stroke='%23fff' stroke-width='7' stroke-linejoin='round' paint-order='stroke'/%3E%3C/svg%3E");
+  --star-plain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 108 108'%3E%3Cpath d='M50,0L60.5,31.8L93.3,25L71,50L93.3,75L60.5,68.2L50,100L39.5,68.2L6.7,75L29,50L6.7,25L39.5,31.8Z' fill='%23E4002B'/%3E%3C/svg%3E");
   --red: #ff3b3b;
   --yellow: #ffd23f;
   --blue: #2f7bff;
@@ -22,19 +31,37 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1230; fon
 button { font-family: var(--font-display); cursor: pointer; }
 
 /* ---------- boot loader ---------- */
-#boot-loader { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;
-  background: radial-gradient(circle at 50% 40%, #3a6cff 0%, #1b2a7a 55%, #0d1230 100%); z-index: 50; transition: opacity 0.5s; }
+#boot-loader { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+  background:
+    linear-gradient(180deg, transparent 0 14%, rgba(65,182,230,0.55) 14% 17%, transparent 17% 83%, rgba(65,182,230,0.55) 83% 86%, transparent 86%),
+    radial-gradient(circle at 50% 40%, #3a6cff 0%, #1b2a7a 55%, #0d1230 100%);
+  z-index: 50; transition: opacity 0.5s; }
 #boot-loader.hidden { opacity: 0; pointer-events: none; }
 .boot-logo { font-family: var(--font-display); font-size: clamp(40px, 8vw, 96px); line-height: 0.9; text-align: center; color: var(--yellow);
   text-shadow: 0 6px 0 #c2410c, 0 10px 24px rgba(0,0,0,0.5); letter-spacing: 2px; }
-.boot-logo span { font-size: 0.55em; color: #fff; text-shadow: 0 5px 0 var(--red), 0 8px 18px rgba(0,0,0,0.5); }
-.boot-bar { width: min(420px, 70vw); height: 18px; border-radius: 12px; background: rgba(255,255,255,0.15); overflow: hidden; border: 3px solid #fff; }
-.boot-bar div { height: 100%; width: 0; background: linear-gradient(90deg, var(--yellow), var(--red)); transition: width 0.25s; }
+.boot-logo span { font-size: 0.55em; color: #fff; text-shadow: 0 5px 0 var(--chi-red), 0 8px 18px rgba(0,0,0,0.5); }
+.boot-stars { display: flex; gap: clamp(14px, 3vw, 30px); }
+.boot-stars svg, .star-row svg { width: clamp(26px, 4vw, 44px); height: auto; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.3)); animation: starTwinkle 2.4s ease-in-out infinite; }
+.boot-stars svg:nth-child(2), .star-row svg:nth-child(2) { animation-delay: 0.3s; }
+.boot-stars svg:nth-child(3), .star-row svg:nth-child(3) { animation-delay: 0.6s; }
+.boot-stars svg:nth-child(4), .star-row svg:nth-child(4) { animation-delay: 0.9s; }
+@keyframes starTwinkle { 0%, 70%, 100% { transform: none; } 80% { transform: scale(1.18) rotate(30deg); } }
+.boot-tag { font-family: var(--font-sign); font-weight: 600; text-transform: uppercase; letter-spacing: 3px; font-size: clamp(13px, 1.6vw, 18px); opacity: 0.9; }
+/* loading bar = a little Chicago flag: white field, light-blue stripes, red fill with a star on its nose */
+.boot-bar { position: relative; width: min(420px, 70vw); height: 22px; border-radius: 12px; overflow: visible; border: 3px solid #fff;
+  background: linear-gradient(180deg, #fff 0 18%, var(--chi-blue) 18% 34%, #fff 34% 66%, var(--chi-blue) 66% 82%, #fff 82%); box-shadow: 0 4px 0 rgba(0,0,0,0.25); }
+.boot-bar div { position: relative; height: 100%; width: 0; border-radius: 9px 0 0 9px; background: linear-gradient(180deg, #ff3355, var(--chi-red)); transition: width 0.25s; }
+.boot-bar div::after { content: ''; position: absolute; right: -15px; top: 50%; width: 30px; height: 30px; margin-top: -15px; background: var(--star) center / contain no-repeat; filter: drop-shadow(0 2px 0 rgba(0,0,0,0.3)); }
 
 /* ---------- generic screens ---------- */
 .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 3vh 3vw; animation: screenIn 0.35s ease-out; }
 @keyframes screenIn { from { opacity: 0; transform: scale(1.03); } to { opacity: 1; transform: none; } }
-.screen-title { font-family: var(--font-display); font-size: clamp(30px, 5vw, 58px); color: #fff; margin: 0 0 1vh; text-shadow: 0 5px 0 rgba(0,0,0,0.35), 0 0 30px rgba(47,123,255,0.6); letter-spacing: 1px; }
+/* screen titles hang like a CTA station sign: dark plate, white lettering, light-blue + red trim */
+.screen-title { font-family: var(--font-display); font-size: clamp(28px, 4.4vw, 52px); color: #fff; margin: 0 0 1vh; letter-spacing: 1px; line-height: 1.15;
+  display: inline-flex; align-items: center; gap: 0.3em; padding: 0.08em 0.55em 0.16em; border-radius: 14px; border: 3px solid #fff;
+  background: linear-gradient(180deg, var(--cta-dark), var(--cta-darker)); box-shadow: inset 0 -6px 0 var(--chi-blue), 0 6px 0 rgba(0,0,0,0.25), 0 10px 24px rgba(0,0,0,0.3);
+  text-shadow: 0 3px 0 rgba(0,0,0,0.45); align-self: center; max-width: 96vw; }
+.screen-title::before, .screen-title::after { content: ''; flex: none; width: 0.68em; height: 0.68em; background: var(--star) center / contain no-repeat; }
 .screen-sub { font-size: clamp(14px, 1.6vw, 20px); opacity: 0.9; margin-bottom: 2vh; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
 .vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(5,8,30,0.65) 100%); }
 
@@ -42,29 +69,63 @@ button { font-family: var(--font-display); cursor: pointer; }
   background: linear-gradient(180deg, #ff6b4a 0%, #e8332a 100%); box-shadow: var(--shadow); transition: transform 0.12s, filter 0.12s, box-shadow 0.12s; letter-spacing: 1px; text-shadow: 0 3px 0 rgba(0,0,0,0.25); outline: none; }
 .btn:hover, .btn:focus-visible, .btn.focus { transform: translateY(-3px) scale(1.04); filter: brightness(1.1); box-shadow: 0 9px 0 rgba(0,0,0,0.25), 0 0 0 6px rgba(255,210,63,0.75), 0 16px 34px rgba(0,0,0,0.35); }
 .btn:active { transform: translateY(2px) scale(0.98); }
-.btn.blue { background: linear-gradient(180deg, #4f9bff 0%, #2559e0 100%); }
-.btn.green { background: linear-gradient(180deg, #5fe07c 0%, #26a447 100%); }
-.btn.purple { background: linear-gradient(180deg, #b27cff 0%, #7b3fe0 100%); }
-.btn.yellow { background: linear-gradient(180deg, #ffe066 0%, #f5a700 100%); color: #4a2a00; text-shadow: none; }
-.btn.gray { background: linear-gradient(180deg, #8b93b8 0%, #565f8a 100%); }
+.btn { background: linear-gradient(180deg, #ff4d5e 0%, #c60c30 100%); }
+.btn.blue { background: linear-gradient(180deg, #33bdf2 0%, #0079b8 100%); }
+.btn.green { background: linear-gradient(180deg, #3fd06e 0%, #00873a 100%); }
+.btn.purple { background: linear-gradient(180deg, #9a6be0 0%, #522398 100%); }
+.btn.yellow { background: linear-gradient(180deg, #fff066 0%, #f5b800 100%); color: #3a2400; text-shadow: none; }
+.btn.gray { background: linear-gradient(0deg, var(--chi-blue) 0 5px, transparent 5px), linear-gradient(180deg, #4a515e 0%, #262b33 100%); }
 .btn.small { font-size: 18px; padding: 6px 16px; min-width: 0; border-width: 3px; border-radius: 14px; }
 .btn-row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
-.panel { background: var(--panel); border: 3px solid rgba(255,255,255,0.85); border-radius: 22px; box-shadow: var(--shadow); padding: 18px 22px; backdrop-filter: blur(6px); }
+/* panels carry the two light-blue stripes of the Chicago flag along their top edge */
+.panel { background: linear-gradient(180deg, var(--chi-blue) 0 3px, transparent 3px 7px, var(--chi-blue) 7px 10px) top 7px center / calc(100% - 44px) 10px no-repeat, var(--panel);
+  border: 3px solid rgba(255,255,255,0.85); border-radius: 22px; box-shadow: var(--shadow); padding: 22px 22px 18px; backdrop-filter: blur(6px); }
+
+/* ---------- CTA "L" line signs (main menu) ---------- */
+.line-bullet { flex: none; display: inline-grid; place-items: center; width: 1.75em; height: 1.75em; border-radius: 50%; background: var(--line, var(--chi-red));
+  border: 3px solid #fff; font-size: 0.8em; line-height: 1; box-shadow: 0 2px 0 rgba(0,0,0,0.35); text-shadow: none; }
+.btn.cta { display: flex; align-items: center; gap: 12px; text-align: left; padding: 6px 18px 10px 8px; border-radius: 14px; border: 3px solid #fff;
+  font-family: var(--font-sign); font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: #fff; text-shadow: 0 2px 0 rgba(0,0,0,0.5);
+  background: linear-gradient(180deg, #333a45 0%, var(--cta-dark) 55%, var(--cta-darker) 100%);
+  box-shadow: inset 0 -6px 0 var(--line, var(--chi-red)), var(--shadow); }
+.btn.cta .cta-label { flex: 1; white-space: nowrap; }
+.btn.cta .cta-sub { font-size: 0.48em; letter-spacing: 2px; opacity: 0.75; white-space: nowrap; align-self: center; padding-left: 8px; border-left: 2px solid rgba(255,255,255,0.35); }
+.btn.cta .cta-sub::after { content: ' ›'; }
+.btn.cta:hover, .btn.cta:focus-visible, .btn.cta.focus { box-shadow: inset 0 -6px 0 var(--line), 0 9px 0 rgba(0,0,0,0.25), 0 0 0 6px rgba(255,210,63,0.8), 0 16px 34px rgba(0,0,0,0.35); }
+.btn.cta:hover .line-bullet, .btn.cta:focus-visible .line-bullet, .btn.cta:focus .line-bullet { transform: scale(1.12) rotate(-8deg); }
+.btn.cta.small { font-size: 18px; padding: 5px 14px 8px 6px; gap: 8px; }
+.btn.cta.small .cta-sub { display: none; }
+.made-in { position: fixed; left: 16px; bottom: 12px; display: flex; align-items: center; gap: 8px; font-family: var(--font-sign); font-weight: 600; text-transform: uppercase;
+  letter-spacing: 2px; font-size: 13px; padding: 4px 12px 4px 6px; border-radius: 10px; background: rgba(21,24,30,0.78); border: 2px solid rgba(255,255,255,0.8); pointer-events: none; }
+.made-in .chi-flag { width: 46px; height: auto; border-radius: 3px; display: block; }
 
 /* ---------- title / main menu ---------- */
 .title-screen { justify-content: center; }
 .logo { text-align: center; font-family: var(--font-display); line-height: 0.85; margin-bottom: 4vh; animation: logoBob 3s ease-in-out infinite; filter: drop-shadow(0 12px 18px rgba(0,0,0,0.45)); }
 .logo .l1 { font-size: clamp(54px, 10vw, 140px); color: var(--yellow); letter-spacing: 3px;
   -webkit-text-stroke: 4px #7a2a00; text-shadow: 0 8px 0 #c2410c, 0 14px 0 rgba(0,0,0,0.25); display: block; }
-.logo .l2 { font-size: clamp(28px, 5vw, 70px); color: #fff; -webkit-text-stroke: 3px #8a0f0f; text-shadow: 0 6px 0 var(--red), 0 10px 0 rgba(0,0,0,0.25); letter-spacing: 6px; display: block; margin-top: 8px; }
-.logo .flag { display: inline-block; animation: flagWave 1s ease-in-out infinite alternate; }
+.logo .l2 { font-size: clamp(28px, 5vw, 70px); color: #fff; -webkit-text-stroke: 3px #8a0f0f; text-shadow: 0 6px 0 var(--chi-red), 0 10px 0 rgba(0,0,0,0.25); letter-spacing: 6px; display: block; margin-top: 8px; }
+.logo .flag { display: inline-block; vertical-align: 0.02em; animation: flagWave 1s ease-in-out infinite alternate; }
+.logo .flag svg { width: 0.78em; height: 0.78em; display: block; filter: drop-shadow(0 4px 0 rgba(0,0,0,0.3)); }
+.logo .flag + .flag { animation-direction: alternate-reverse; }
+/* the Chicago flag as a ribbon under the logo: white field, two light-blue stripes, four red stars */
+.logo .l3 { display: inline-flex; align-items: center; justify-content: center; margin-top: 14px; padding: 6px 26px; border-radius: 10px; border: 3px solid #fff;
+  background: linear-gradient(180deg, #fff 0 14%, var(--chi-blue) 14% 28%, #fff 28% 72%, var(--chi-blue) 72% 86%, #fff 86%); box-shadow: 0 5px 0 rgba(0,0,0,0.25); }
+.logo .l3 .star-row { display: flex; gap: clamp(14px, 2.6vw, 34px); }
+.logo .l3 .star-row svg { width: clamp(22px, 2.9vw, 38px); filter: none; }
+.logo .l3 { gap: clamp(12px, 1.8vw, 24px); }
+.logo .l3 .sweet { font-family: var(--font-display); font-size: clamp(18px, 2.5vw, 34px); color: var(--chi-red); letter-spacing: 1px; line-height: 1.1;
+  -webkit-text-stroke: 0; text-shadow: 0 2px 0 rgba(255,255,255,0.9); white-space: nowrap; }
 @keyframes logoBob { 0%,100% { transform: translateY(0) rotate(-1.5deg); } 50% { transform: translateY(-10px) rotate(1.5deg); } }
 @keyframes flagWave { from { transform: rotate(-12deg); } to { transform: rotate(12deg); } }
 .menu-list { display: flex; flex-direction: column; gap: 14px; align-items: center; }
 .menu-list .btn { min-width: 300px; }
 .footer-hint { position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; font-size: 15px; opacity: 0.85; text-shadow: 0 2px 4px rgba(0,0,0,0.7); pointer-events: none; }
 .corner-stats { position: fixed; top: 14px; right: 18px; font-size: 15px; text-align: right; text-shadow: 0 2px 4px rgba(0,0,0,0.7); }
-.press-start { font-family: var(--font-display); font-size: clamp(22px, 3vw, 36px); animation: blink 1.2s infinite; text-shadow: 0 4px 0 rgba(0,0,0,0.4); }
+.press-start { font-family: var(--font-display); font-size: clamp(22px, 3vw, 36px); animation: blink 1.2s infinite; text-shadow: 0 4px 0 rgba(0,0,0,0.4);
+  padding: 4px 24px 8px; border-radius: 999px; background: rgba(21,24,30,0.72); border: 3px solid #fff; box-shadow: inset 0 -5px 0 var(--chi-red), 0 6px 0 rgba(0,0,0,0.25); }
+.title-tagline { margin-top: 2.2vh; font-family: var(--font-sign); font-weight: 600; text-transform: uppercase; letter-spacing: 3px; font-size: clamp(13px, 1.4vw, 17px);
+  text-shadow: 0 2px 4px rgba(0,0,0,0.8); opacity: 0.95; }
 @keyframes blink { 50% { opacity: 0.25; } }
 
 /* ---------- character select ---------- */
@@ -95,8 +156,17 @@ button { font-family: var(--font-display); cursor: pointer; }
 .track-card { border-radius: 20px; border: 4px solid rgba(255,255,255,0.75); background: rgba(10,16,48,0.82); overflow: hidden; color: #fff; text-align: left; padding: 0; box-shadow: var(--shadow); transition: transform 0.15s; font-family: var(--font-body); }
 .track-card:hover, .track-card:focus-visible, .track-card.selected { transform: translateY(-6px) scale(1.03); border-color: var(--yellow); outline: none; }
 .track-card canvas { width: 100%; display: block; aspect-ratio: 16/10; }
-.track-card .tc-body { padding: 10px 14px 14px; }
-.track-card h3 { font-family: var(--font-display); font-size: 22px; margin: 0 0 4px; }
+.track-card { background: linear-gradient(180deg, var(--cta-dark), var(--cta-darker)); }
+.track-card canvas { border-bottom: 6px solid var(--line, var(--chi-red)); }
+.track-card { display: flex; flex-direction: column; justify-content: flex-start; }
+.track-card .tc-body { padding: 8px 14px 12px; width: 100%; }
+.track-card h3 { font-family: var(--font-display); font-size: 22px; margin: 0 0 4px; line-height: 1.1; }
+/* "next stop" station strip */
+.tc-line { display: flex; align-items: center; gap: 7px; font-family: var(--font-sign); font-weight: 600; text-transform: uppercase; letter-spacing: 1.2px; font-size: 13px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; }
+.tc-line .line-bullet { font-size: 13px; border-width: 2px; width: 1.6em; height: 1.6em; }
+.tc-line .ln { color: var(--line-text, #fff); background: var(--line); padding: 0 7px; border-radius: 5px; }
+.tc-line .ns { opacity: 0.9; overflow: hidden; text-overflow: ellipsis; }
+.tc-line .ns b { color: var(--yellow); font-weight: 700; }
 .track-card .meta { font-size: 14px; opacity: 0.9; display: flex; justify-content: space-between; gap: 8px; }
 .stars { color: var(--yellow); letter-spacing: 2px; }
 .options-row { display: flex; gap: 14px; align-items: center; margin: 2vh 0; flex-wrap: wrap; justify-content: center; }
@@ -397,3 +467,129 @@ body.touch-mode .settings input[type=range] { height: 28px; }
   .stat { margin: 3px 0; font-size: 14px; }
   .special-box { margin-top: 8px; padding: 8px 10px; font-size: 13px; }
 }
+
+/* ======================================================================
+   Chicago style: theatre marquees, L-platform boards, flag confetti
+   ====================================================================== */
+/* theatre marquee: red sign, gold rim, a ring of chasing light bulbs */
+.marquee { position: relative; --bulb: 16px; color: #fff6cf; border: 3px solid #ffd23f; border-radius: 16px;
+  background: radial-gradient(ellipse at 50% 0%, #ff5a68 0%, #c60c30 55%, #7a0018 100%);
+  box-shadow: 0 0 0 3px #7a0018, 0 8px 0 rgba(0,0,0,0.25), 0 14px 30px rgba(0,0,0,0.35); }
+.marquee::before { content: ''; position: absolute; inset: 2px; border-radius: inherit; padding: var(--bulb); pointer-events: none;
+  background: radial-gradient(circle, #fffbe0 0 16%, #ffc83d 27%, rgba(255,200,61,0) 48%) 0 0 / var(--bulb) var(--bulb);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: bulbChase 0.7s steps(1) infinite; }
+@keyframes bulbChase { 50% { background-position: calc(var(--bulb) / 2) 0; } }
+
+/* countdown / GO! / FINISH! hang on a marquee */
+.hud .center-msg { left: 0; right: 0; margin: 0 auto; width: fit-content; min-width: 2.1em; max-width: 94%; white-space: nowrap; --bulb: 0.16em;
+  padding: 0.14em 0.42em 0.2em; border-radius: 0.2em; line-height: 1; }
+.hud .center-msg:not(.show):not(.sticky)::before { animation: none; }
+.hud .center-msg small { display: block; margin-top: 0.12em; font-family: var(--font-sign); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  font-size: 0.26em; color: #fff; -webkit-text-stroke: 0; text-shadow: 0 2px 0 #5a0012; }
+.split .hud-view .center-msg { font-size: clamp(40px, 9vh, 90px); }
+
+/* lap counter + timer = L platform arrival boards (amber LED lettering) */
+.hud .lap, .hud .timer { font-family: var(--font-sign); font-weight: 700; line-height: 1.08; letter-spacing: 1px; font-variant-numeric: tabular-nums;
+  background: rgba(21,24,30,0.82); border: 2px solid rgba(255,255,255,0.85); border-radius: 12px; padding: 3px 14px 5px; text-shadow: 0 2px 0 rgba(0,0,0,0.6); }
+.hud .lap { box-shadow: inset 6px 0 0 var(--chi-red), 0 4px 0 rgba(0,0,0,0.25); padding-left: 16px; font-size: clamp(22px, 3.8vh, 38px); }
+.hud .timer { box-shadow: inset -6px 0 0 var(--chi-blue), 0 4px 0 rgba(0,0,0,0.25); padding-right: 16px; font-size: clamp(19px, 3.2vh, 32px); }
+.hud .lap .lap-n, .hud .timer { color: #ffbf3c; }
+.hud .lap small, .hud .timer small { font-family: var(--font-sign); font-weight: 500; text-transform: uppercase; letter-spacing: 1.5px; font-size: 0.48em; color: #fff; opacity: 0.92; }
+.hud .lap small b { color: #7fd8ff; font-weight: 600; }
+.hud .board { top: calc(2vh + clamp(62px, 9.4vh, 94px)); }
+
+/* position badge sits on a big red Chicago star */
+.hud .pos { padding: 0.1em 0.12em 0.04em 0.16em; background: var(--star) 42% 55% / 1.5em 1.5em no-repeat; -webkit-text-stroke-color: #2a0610; }
+.hud .pos.p3 { color: #ffd9a8; }
+.hud .item-slot { border-color: #fff; box-shadow: 0 0 0 4px var(--chi-blue), var(--shadow); }
+.hud .item-slot::after { content: ''; position: absolute; right: -12px; top: -12px; width: 30px; height: 30px; background: var(--star) center / contain no-repeat; }
+.hud .item-name { font-family: var(--font-sign); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; background: rgba(21,24,30,0.78); padding: 0 10px 1px; border-radius: 8px; }
+.hud .item-name:empty { display: none; }
+.hud .minimap { border-color: var(--chi-blue); box-shadow: 0 0 0 2px #fff; }
+.hud .board .row { border-left: 4px solid var(--chi-blue); }
+.hud .board .row.me { border-left-color: var(--chi-red); }
+.hud .toast { -webkit-text-stroke: 1.5px #1a1a40; }
+.hud .drift { border-color: #fff; box-shadow: 0 0 0 2px var(--chi-blue); }
+
+/* loading: "Now arriving" platform board */
+.loading-box.arrival { width: min(680px, 92vw); padding: 16px 26px 22px; border-radius: 20px; border: 3px solid #fff;
+  background: linear-gradient(180deg, rgba(34,39,47,0.94), rgba(21,24,30,0.94)); box-shadow: inset 0 -7px 0 var(--line, var(--chi-red)), 0 10px 30px rgba(0,0,0,0.45); }
+.arr-head { display: flex; align-items: center; justify-content: center; gap: 10px; font-family: var(--font-sign); font-weight: 600; text-transform: uppercase; letter-spacing: 3px; font-size: 16px; color: #ffbf3c; }
+.arr-head .line-bullet { font-size: 16px; }
+.arr-stop { font-family: var(--font-sign); font-weight: 500; text-transform: uppercase; letter-spacing: 2px; font-size: 15px; opacity: 0.85; margin-top: 2px; }
+.loading-box .tip { background: rgba(255,255,255,0.08); border-radius: 12px; padding: 8px 14px; line-height: 1.3; }
+.loading-box .tip b { display: block; font-family: var(--font-sign); font-weight: 600; text-transform: uppercase; letter-spacing: 2px; font-size: 0.8em; color: var(--chi-blue); }
+
+/* results / standings */
+.results h2.marquee { text-align: center; padding: calc(var(--bulb) + 2px) calc(var(--bulb) + 12px) calc(var(--bulb) + 6px); margin-bottom: 10px; text-shadow: 0 3px 0 #5a0012; }
+.results .screen-sub { text-align: center; font-family: var(--font-sign); font-weight: 600; text-transform: uppercase; letter-spacing: 2px; }
+.results tr.me td { background: linear-gradient(180deg, #ffe066, #ffc21a); }
+.winner-banner small { display: block; width: fit-content; margin-top: 6px; font-family: var(--font-sign); font-weight: 700; text-transform: uppercase; letter-spacing: 3px; font-size: 0.34em;
+  color: #fff; -webkit-text-stroke: 0; text-shadow: 0 2px 0 rgba(0,0,0,0.4); background: var(--chi-red); border: 3px solid #fff; border-radius: 10px; padding: 2px 14px 4px; }
+.winner-banner .chi-star { width: 0.7em; height: 0.7em; vertical-align: -0.02em; }
+.confetti-layer { position: fixed; inset: 0; overflow: hidden; pointer-events: none; }
+.confetti { position: absolute; top: -50px; display: block; animation: confettiFall 5s linear infinite; }
+.confetti svg { display: block; width: 100%; height: auto; }
+.confetti .ribbon { display: block; width: 38%; margin: 0 auto; border-radius: 3px; background: var(--chi-blue); border: 1px solid #fff; }
+@keyframes confettiFall { from { transform: translateY(0) rotate(0deg); } to { transform: translateY(calc(100vh + 80px)) rotate(600deg); } }
+
+/* pause = "this train is standing by" */
+.modal h2 { font-family: var(--font-display); }
+.modal-sub { font-family: var(--font-sign); font-weight: 500; text-transform: uppercase; letter-spacing: 2px; font-size: 14px; opacity: 0.85; margin: -8px 0 14px; }
+.modal .modal-sub .chi-star { width: 14px; height: 14px; vertical-align: -2px; }
+.settings h3 { display: flex; align-items: center; gap: 8px; }
+.settings h3::before { content: ''; width: 20px; height: 20px; background: var(--star) center / contain no-repeat; }
+.cup-names { font-family: var(--font-sign); font-weight: 500; letter-spacing: 1px; text-transform: uppercase; font-size: 13px; opacity: 0.85; margin: -6px 0 8px; text-shadow: 0 2px 3px rgba(0,0,0,0.7); }
+
+/* main menu: logo + L-line signs */
+.menu-screen .menu-list { align-items: stretch; width: min(400px, 92vw); }
+.menu-screen .menu-list .btn.cta { min-width: 0; font-size: clamp(20px, 2.3vw, 28px); }
+.menu-screen .menu-list .btn-row { width: 100%; flex-wrap: nowrap; gap: 12px; }
+.menu-screen .menu-list .btn-row .btn.cta { flex: 1; min-width: 0; font-size: 18px; }
+.menu-screen .menu-list .btn-row .line-bullet { font-size: 15px; }
+
+/* short screens (phones in landscape): logo left, signs right */
+@media (max-height: 520px) {
+  .logo .l3 { margin-top: 6px; padding: 3px 14px; border-width: 2px; }
+  .logo .l3 .star-row { gap: 12px; }
+  .logo .l3 .star-row svg { width: 15px; }
+  .logo .l3 { gap: 8px; padding: 3px 10px; }
+  .logo .l3 .sweet { font-size: 16px; }
+  .title-tagline { margin-top: 8px; font-size: 12px; }
+  .menu-screen { flex-direction: row; justify-content: center; align-items: center; gap: 4vw; }
+  .menu-screen .logo { margin: 0; }
+  .menu-screen .logo .l1 { font-size: 64px; }
+  .menu-screen .logo .l2 { font-size: 27px; letter-spacing: 3px; }
+  .menu-screen .menu-list { gap: 7px; }
+  .menu-screen .menu-list { width: 296px; }
+  .menu-screen .menu-list .btn.cta { min-width: 0; font-size: 19px; padding: 3px 12px 7px 5px; gap: 9px; border-width: 3px; }
+  .menu-screen .menu-list .btn-row { gap: 8px; }
+  .menu-screen .menu-list .btn-row .btn.cta { font-size: 16px; }
+  .made-in { display: none; }
+  .btn.cta .line-bullet { border-width: 2px; }
+  .screen-title { font-size: 21px; padding: 1px 12px 5px; border-width: 2px; border-radius: 10px; box-shadow: inset 0 -4px 0 var(--chi-blue), 0 3px 0 rgba(0,0,0,0.25); }
+  .panel { background-position: top 4px center; padding-top: 16px; }
+  .char-info { padding-top: 16px; }
+  .tc-line { font-size: 10px; letter-spacing: 0.6px; gap: 4px; margin-bottom: 2px; }
+  .tc-line .line-bullet { font-size: 9px; }
+  .track-card canvas { aspect-ratio: 2 / 1; border-bottom-width: 4px; }
+  .hud .lap, .hud .timer { padding: 1px 10px 3px; border-radius: 9px; }
+  .hud .lap { padding-left: 12px; box-shadow: inset 4px 0 0 var(--chi-red); }
+  .hud .timer { padding-right: 12px; box-shadow: inset -4px 0 0 var(--chi-blue); }
+  .hud .item-slot::after { width: 22px; height: 22px; right: -9px; top: -9px; }
+  .hud .item-name { font-size: 12px; }
+  .loading-box.arrival { padding: 8px 16px 12px; margin-bottom: 4vh; }
+  .arr-head { font-size: 12px; letter-spacing: 2px; }
+  .arr-stop { font-size: 12px; }
+  .loading-box .tip { margin: 6px 0 10px; padding: 5px 10px; }
+  .results h2.marquee { --bulb: 10px; font-size: 22px; margin-bottom: 4px; padding: 11px 18px 12px; }
+  .results .screen-sub { font-size: 11px; }
+  body.touch-mode .hud .pos { top: calc(2vh + 52px); }
+  .winner-banner small { font-size: 12px; padding: 1px 10px 2px; border-width: 2px; }
+  .modal-sub { font-size: 11px; margin: -4px 0 8px; }
+  .cup-names { font-size: 11px; margin: -4px 0 4px; }
+}
+/* keep the flag stripes clear of the racer's name */
+.panel.char-info { padding-top: 22px; }
+@media (max-height: 520px) { .panel.char-info { padding-top: 16px; } }

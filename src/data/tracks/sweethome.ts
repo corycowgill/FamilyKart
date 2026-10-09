@@ -50,6 +50,7 @@ export const SWEETHOME: TrackDef = {
   id: 'sweethome',
   name: 'Sweet Home Chicago',
   theme: 'chicago',
+  scenery: 'sweethome',
   description: 'The grand tour: the Mag Mile, Lake Shore Drive, Wrigleyville, Lower Wacker and a leap over the river.',
   difficulty: 2,
   laps: 3,

@@ -4,9 +4,11 @@ import { RAMP_HEIGHT, type Track, type TrackPath, type TrackSample } from '../..
 import type { SurfaceType, TrackTheme } from '../../sim/types';
 import { getField, type TrackField } from '../scenery/field';
 import {
-  brickTexture, canvasTexture, checkerTexture, chevronTexture, grassTexture, noiseTexture, roadTexture, textTexture, waterTexture,
+  brickTexture, canvasTexture, checkerTexture, chevronTexture, grassTexture, noiseTexture, roadTexture, textTexture,
   type RoadTexOpts,
 } from '../scenery/textures';
+import { sunOffsetFor } from '../Environment';
+import { createWaterMaterial, WATER_COLORS, type WaterMaterial } from '../Water';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -396,6 +398,61 @@ function surfaceTexture(type: SurfaceType): THREE.Texture {
 
 const TABLE_TINT = new THREE.Color('#d9a066');
 
+/* ------------------------------------------------------------------ material helpers */
+
+/**
+ * Cheap "baked" shading via onBeforeCompile: `shade` is GLSL that returns a brightness multiplier
+ * from the mesh's raw uv (`aoUv`), e.g. darkening the shoulder where it meets the wall.
+ */
+function withUvShade<T extends THREE.MeshStandardMaterial>(mat: T, key: string, shade: string): T {
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 aoUv;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\naoUv = uv;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nvarying vec2 aoUv;\nfloat uvShade(){ ${shade} }`)
+      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb *= uvShade();');
+  };
+  mat.customProgramCacheKey = () => `uvshade-${key}`;
+  return mat;
+}
+
+/**
+ * Derive a detail map from the road's colour canvas: R = height (speckle luminance, for a subtle
+ * bump), G = roughness (painted lines glossier than the asphalt, slight per-speck variation).
+ */
+function roadDetailTexture(src: THREE.Texture, baseColor: string, baseRough: number): THREE.Texture | null {
+  const img = src.image as HTMLCanvasElement | undefined;
+  if (!img || typeof document === 'undefined' || !(img instanceof HTMLCanvasElement)) return null;
+  const c = document.createElement('canvas');
+  c.width = img.width;
+  c.height = img.height;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  if (!g) return null;
+  g.drawImage(img, 0, 0);
+  const data = g.getImageData(0, 0, c.width, c.height);
+  const d = data.data;
+  const b = new THREE.Color(baseColor);
+  const baseLum = (b.r + b.g + b.b) / 3;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = (d[i] + d[i + 1] + d[i + 2]) / 765;
+    const paint = lum > Math.min(0.97, baseLum + 0.22) && Math.max(d[i], d[i + 1]) > 180;
+    const n = ((i * 2654435761) >>> 0) / 4294967296;
+    const rough = paint ? 0.38 : Math.min(1, baseRough * (0.86 + 0.24 * n) + (lum - baseLum) * 0.4);
+    d[i] = Math.round(lum * 255);
+    d[i + 1] = Math.round(Math.max(0.05, rough) * 255);
+    d[i + 2] = 0;
+  }
+  g.putImageData(data, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.NoColorSpace;
+  t.wrapS = src.wrapS;
+  t.wrapT = src.wrapT;
+  t.repeat.copy(src.repeat);
+  t.anisotropy = 8;
+  return t;
+}
+
 /* ------------------------------------------------------------------ build */
 
 export function buildTrackView(track: Track, quality: Quality): TrackViewHandle {
@@ -430,7 +487,23 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
   /* ---------- road, shoulders */
   const roadTex = tex(roadTexture(style.road, 7 + def.id.length));
   const roadMat = own(new THREE.MeshStandardMaterial({ map: roadTex, roughness: style.roadRough, metalness: 0 }));
+  if (quality !== 'low') {
+    const detail = roadDetailTexture(roadTex, style.road.base, style.roadRough);
+    if (detail) {
+      own(detail);
+      roadMat.roughnessMap = detail;
+      roadMat.roughness = 1;
+      if (quality === 'high') {
+        roadMat.bumpMap = detail;
+        roadMat.bumpScale = 0.9;
+      }
+    }
+  }
+  // slightly darker road edges (where the road meets curbs / shoulder)
+  withUvShade(roadMat, 'road', 'return mix(0.84, 1.0, smoothstep(0.0, 0.045, aoUv.x) * smoothstep(1.0, 0.955, aoUv.x));');
   const shoulderMat = own(new THREE.MeshStandardMaterial({ map: tex(style.shoulder()), roughness: style.shoulderRough }));
+  // contact shadow at the foot of the walls (shoulder u = 0 at the road edge, 1 under the wall)
+  withUvShade(shoulderMat, 'shoulder', 'return mix(1.0, 0.58, smoothstep(0.8, 1.0, aoUv.x));');
   const roadGB = new GB();
   const scRoadGB = new GB();
   const scRoadMat = style.scRoad
@@ -502,7 +575,9 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
     g.fillStyle = 'rgba(0,0,0,0.18)';
     g.fillRect(w - 4, 0, 4, h);
   }));
-  const curbMat = own(new THREE.MeshStandardMaterial({ map: curbTex, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }));
+  const curbMat = own(new THREE.MeshStandardMaterial({ map: curbTex, roughness: 0.42, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }));
+  // rounded "bevel" shading across the curb
+  withUvShade(curbMat, 'curb', 'return 0.72 + 0.36 * sin(clamp(aoUv.x, 0.0, 1.0) * 3.14159);');
   const curbGB = new GB();
   for (const p of track.paths) {
     const n = p.samples.length;
@@ -535,9 +610,12 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
   const wallTex = tex(wallStyle.tex());
   const wallMat = own(
     wallStyle.kind === 'strip'
-      ? new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9, alphaTest: 0.5, side: THREE.DoubleSide })
-      : new THREE.MeshStandardMaterial({ map: wallTex, roughness: wallStyle.rough, side: THREE.DoubleSide }),
+      ? new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9, alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: true })
+      : new THREE.MeshStandardMaterial({ map: wallTex, roughness: wallStyle.rough, side: THREE.DoubleSide, vertexColors: true }),
   );
+  // ambient occlusion baked into vertex colours: darker at the wall foot
+  const aoCol = (h: number) => wallAo.setScalar(0.6 + 0.4 * Math.min(1, Math.max(0, h / 0.8)));
+  const wallAo = new THREE.Color();
   const wallGB = new GB();
   const skirtGB = new GB();
   for (const p of track.paths) {
@@ -585,8 +663,8 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
             const l = lat(smp);
             const x = smp.x + smp.nx * l, z = smp.z + smp.nz * l;
             const v = ds[k] / wallStyle.texLen;
-            const A = wallGB.vert(x, smp.y - 0.1, z, v, 0);
-            const B = wallGB.vert(x, smp.y + wallStyle.height, z, v, 1);
+            const A = wallGB.vert(x, smp.y - 0.1, z, v, 0, aoCol(0));
+            const B = wallGB.vert(x, smp.y + wallStyle.height, z, v, 1, aoCol(1));
             if (k > 0) wallGB.quad(prevA, A, prevB, B);
             prevA = A;
             prevB = B;
@@ -605,7 +683,7 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
               const u = ds[k] / wallStyle.texLen;
               const mk = (pt: [number, number], vv: number) => {
                 const l = side * (base + pt[0]);
-                return wallGB.vert(smp.x + smp.nx * l, smp.y + pt[1] - 0.05, smp.z + smp.nz * l, u, 1 - vv / per);
+                return wallGB.vert(smp.x + smp.nx * l, smp.y + pt[1] - 0.05, smp.z + smp.nz * l, u, 1 - vv / per, aoCol(pt[1]));
               };
               const A = mk(prof[j], pv[j]);
               const B = mk(prof[j + 1], pv[j + 1]);
@@ -623,7 +701,7 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
             const base = wallDistOf(smp) + style.wallOffset;
             const ids = prof.map((pt) => {
               const l = side * (base + pt[0]);
-              return wallGB.vert(smp.x + smp.nx * l, smp.y + pt[1] - 0.05, smp.z + smp.nz * l, 0.02, 0.5);
+              return wallGB.vert(smp.x + smp.nx * l, smp.y + pt[1] - 0.05, smp.z + smp.nz * l, 0.02, 0.5, aoCol(pt[1]));
             });
             for (let j = 1; j < ids.length - 1; j++) {
               const flip = (endK === 0) !== (side > 0);
@@ -759,13 +837,17 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
   }
 
   /* ---------- channel water */
+  const waters: WaterMaterial[] = [];
   if (style.water) {
-    const wt = tex(waterTexture(style.water, style.waterLight));
-    const waterMat = own(new THREE.MeshStandardMaterial({ map: wt, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.92 }));
+    const L = def.lighting;
+    const skyHorizon = new THREE.Color(L.skyBottom).lerp(new THREE.Color(L.fog), 0.4);
+    const waterBase = { skyTop: L.skyTop, skyHorizon, sunColor: L.sun, sunDir: sunOffsetFor(def.theme), quality };
+    const pal = waterPalette(def.theme, def.landmarks, style);
+    const waterMat = own(createWaterMaterial({ ...waterBase, ...pal.channel, scale: 0.55 }));
+    waters.push(waterMat);
     for (const c of field.channels) {
+      waterMat.uniforms.flow.value.set(c.ax, c.az).multiplyScalar(0.9);
       const geo = own(new THREE.PlaneGeometry(c.halfLen * 2, c.halfWidth * 2 + 8));
-      const uv = geo.attributes.uv as THREE.BufferAttribute;
-      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * c.halfLen / 6, uv.getY(i) * (c.halfWidth + 4) / 6);
       const m = new THREE.Mesh(geo, waterMat);
       // plane in xz with its length along local x; the holder turns local x onto the channel axis
       m.rotation.x = -Math.PI / 2;
@@ -773,12 +855,20 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
       holder.add(m);
       holder.position.set(c.cx, style.waterY, c.cz);
       holder.rotation.y = -Math.atan2(c.az, c.ax);
-      m.receiveShadow = true;
+      m.receiveShadow = false;
       group.add(holder);
     }
-    animated.push((dt) => {
-      wt.offset.x += dt * 0.03;
-      wt.offset.y += dt * 0.012;
+    // open water beyond the shoreline (Lake Michigan): drawn a little above the scenery's lake plane
+    if (Number.isFinite(field.shoreX) && pal.lake) {
+      const lakeMat = own(createWaterMaterial({ ...waterBase, ...pal.lake, scale: 1 }));
+      waters.push(lakeMat);
+      const lake = new THREE.Mesh(own(new THREE.PlaneGeometry(5000, 5000).rotateX(-Math.PI / 2)), lakeMat);
+      lake.position.set(field.shoreX + 2500 - 4, -0.55, (field.bounds.minZ + field.bounds.maxZ) / 2);
+      lake.name = 'lakeWater';
+      group.add(lake);
+    }
+    animated.push((_dt, time) => {
+      for (const w of waters) w.setTime(time);
     });
   }
 
@@ -892,7 +982,7 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
     gantry.add(chk);
     // start lights
     const lightGeo = own(new THREE.SphereGeometry(0.35, 12, 8));
-    const lightMat = own(new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2a2a, emissiveIntensity: 1.2 }));
+    const lightMat = own(new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2a2a, emissiveIntensity: 2.6 }));
     for (let i = 0; i < 4; i++) {
       const m = new THREE.Mesh(lightGeo, lightMat);
       m.position.set((i - 1.5) * 1.2, 8.0, -0.6);
@@ -973,7 +1063,9 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
   const padTex = tex(chevronTexture('#fff36b', '#ff8a1a'));
   padTex.repeat.set(1, 1.5);
   const padMat = own(new THREE.MeshBasicMaterial({ map: padTex, transparent: true, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 }));
-  const padBaseMat = own(new THREE.MeshStandardMaterial({ color: 0x2a2fd8, emissive: 0x3a3cff, emissiveIntensity: 0.6, roughness: 0.3, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
+  // slightly over-bright so the chevrons and the pad edge glow through the bloom pass
+  padMat.color.setScalar(1.35);
+  const padBaseMat = own(new THREE.MeshStandardMaterial({ color: 0x2a2fd8, emissive: 0x3a3cff, emissiveIntensity: 1.2, roughness: 0.25, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
   const padGB = new GB();
   const padBaseGB = new GB();
   for (const p of track.boostPads) {
@@ -995,7 +1087,7 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
   if (padMesh) padMesh.receiveShadow = false;
   animated.push((dt, time) => {
     padTex.offset.y -= dt * 1.6;
-    padBaseMat.emissiveIntensity = 0.5 + 0.35 * Math.sin(time * 8);
+    padBaseMat.emissiveIntensity = 1.3 + 0.7 * Math.sin(time * 8);
   });
 
   /* ---------- debug overlays */
@@ -1054,4 +1146,20 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
       disposables.length = 0;
     },
   };
+}
+
+/** Water colours per theme; Chicago's river channel is dyed green to match the river landmark. */
+function waterPalette(theme: TrackTheme, landmarks: Array<{ kind: string }>, style: Style): {
+  channel: { deep: string; shallow: string; opacity?: number };
+  lake: { deep: string; shallow: string } | null;
+} {
+  const hasRiver = landmarks.some((l) => l.kind === 'river');
+  switch (theme) {
+    case 'chicago':
+      return { channel: hasRiver ? WATER_COLORS.greenRiver : WATER_COLORS.lake, lake: WATER_COLORS.lake };
+    case 'snow':
+      return { channel: WATER_COLORS.icy, lake: WATER_COLORS.icy };
+    default:
+      return { channel: style.water ? { deep: style.water, shallow: style.waterLight } : WATER_COLORS.pond, lake: WATER_COLORS.pond };
+  }
 }

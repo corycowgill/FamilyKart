@@ -1,9 +1,15 @@
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { SceneryContext, SceneryHandle } from './types';
-import { addClouds, Batch, boxUV, ctxBits, disposeGroup, elevatedTrain, flagGeometry, flagMaterial, M, mergeColored, PROPS, setInstance, unitBox, vcMat, windowedMaterial } from './common';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { addClouds, Batch, trimShadows, ctxBits, disposeGroup, flagGeometry, flagMaterial, M, mergeColored, PROPS, setInstance, tintMaskMat, unitBox, vcMat, windowedMaterial } from './common';
 import { getField } from './field';
-import { canvasTexture, crowdTexture, dotTexture, flagTexture, textTexture, waterTexture, windowTexture } from './textures';
+import { canvasTexture, crowdTexture, drawChicagoFlag, flagTexture, textTexture, waterTexture, windowTexture } from './textures';
+import {
+  adlerPlanetarium, aonCenter, beam, bluesClub, sweetHomeBillboard, windGusts, buildBuckingham, buildNavyPier, artMuseum, bannerBatch, beefStand, bikeDockGeo, busShelterGeo, chicagoTheatre, cloudGate, CTA, crownFountain, elevatedL, faceRoad,
+  findSpot, glassSpireTower, hancockCenter, hotDogStand, Kit, lifeguardGeo, marinaCity, merchMart, museumHall, picasso, pizzeria, popcornShop, pritzkerPavilion,
+  rooftopTankGeo, sheddAquarium, tribuneTower, waterTowerCastle, wavyTower, willisTower, wrigleyBuilding,
+} from './chicagoLandmarks';
 
 /**
  * Chicago Grand Prix: Lake Michigan to the east with Navy Pier, the Ferris wheel and sailboats,
@@ -22,6 +28,8 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
   const vc = vcMat(bag);
   const vcGloss = vcMat(bag, { roughness: 0.35, metalness: 0.3 });
   const shoreX = field.shoreX;
+  const kit = new Kit(bag, group, { lit: 0, snow: false, quality });
+  const hi = quality === 'high', lo = quality === 'low';
 
   /* ------------------------------------------------ Lake Michigan */
   const waterTex = bag.add(waterTexture('#2b8be0', '#bfe9ff', 77));
@@ -95,114 +103,135 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
   /* ------------------------------------------------ Navy Pier + Ferris wheel */
   {
     const pier = lm('pier') ?? { x: 110, z: 40 };
-    const px0 = shoreX - 2, px1 = shoreX + 230, pz = pier.z;
-    const parts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [
-      [new THREE.BoxGeometry(px1 - px0, 1.2, 44), '#cdbfa6', M.t((px0 + px1) / 2, 0.6, pz)],
-      [new THREE.BoxGeometry(px1 - px0, 2.5, 46), '#8b7d6b', M.t((px0 + px1) / 2, -1.2, pz)],
-      // exhibition halls
-      [new THREE.BoxGeometry(150, 9, 16), '#e9dcc4', M.t(px0 + 140, 5.7, pz + 12)],
-      [new THREE.BoxGeometry(152, 1.2, 18), '#2f6f6a', M.t(px0 + 140, 10.8, pz + 12)],
-      [new THREE.BoxGeometry(40, 16, 30), '#d9c19b', M.t(px1 - 22, 9.2, pz)],
-      [new THREE.CylinderGeometry(9, 12, 6, 8), '#2f6f6a', M.t(px1 - 22, 20, pz)],
-      [new THREE.BoxGeometry(14, 22, 14), '#c9a77c', M.t(px0 + 18, 12.2, pz + 10)],
-      [new THREE.ConeGeometry(10.5, 6, 4).rotateY(Math.PI / 4), '#2f6f6a', M.t(px0 + 18, 26.2, pz + 10)],
-    ];
-    // railing posts along the pier edge
-    for (let x = px0 + 4; x < px1; x += 8) {
-      parts.push([new THREE.BoxGeometry(0.3, 1.1, 0.3), '#3c3c3c', M.t(x, 1.75, pz - 21.5)]);
-    }
-    parts.push([new THREE.BoxGeometry(px1 - px0, 0.2, 0.2), '#3c3c3c', M.t((px0 + px1) / 2, 2.2, pz - 21.5)]);
-    const pm = new THREE.Mesh(bag.add(mergeColored(parts)), vc);
-    pm.castShadow = pm.receiveShadow = true;
-    group.add(pm);
-    placer.reserve((px0 + px1) / 2, pz, 120);
-
     const fw = lm('ferrisWheel') ?? { x: 140, z: 40 };
-    const R = 28;
-    const hubY = 1.2 + R + 4;
-    const wheelRoot = new THREE.Group();
-    wheelRoot.position.set(fw.x, 0, fw.z - 6);
-    wheelRoot.rotation.y = Math.PI / 2; // wheel plane faces the track (west)
-    group.add(wheelRoot);
-    // static A-frame supports
-    const sup = mergeColored([
-      [new THREE.CylinderGeometry(0.6, 0.8, hubY * 1.12, 8), '#e8e8e8', M.trs(-9, hubY / 2, 3.5, 0, 0, -0.28)],
-      [new THREE.CylinderGeometry(0.6, 0.8, hubY * 1.12, 8), '#e8e8e8', M.trs(9, hubY / 2, 3.5, 0, 0, 0.28)],
-      [new THREE.CylinderGeometry(0.6, 0.8, hubY * 1.12, 8), '#e8e8e8', M.trs(-9, hubY / 2, -3.5, 0, 0, -0.28)],
-      [new THREE.CylinderGeometry(0.6, 0.8, hubY * 1.12, 8), '#e8e8e8', M.trs(9, hubY / 2, -3.5, 0, 0, 0.28)],
-      [new THREE.CylinderGeometry(1.4, 1.4, 9, 12).rotateX(Math.PI / 2), '#cfcfcf', M.t(0, hubY, 0)],
-    ]);
-    const supM = new THREE.Mesh(bag.add(sup), vcGloss);
-    supM.castShadow = true;
-    wheelRoot.add(supM);
-    const wheel = new THREE.Group();
-    wheel.position.y = hubY;
-    wheelRoot.add(wheel);
-    const wparts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [
-      [new THREE.TorusGeometry(R, 0.45, 6, 64), '#ffffff', M.t(0, 0, 1.6)],
-      [new THREE.TorusGeometry(R, 0.45, 6, 64), '#ffffff', M.t(0, 0, -1.6)],
-      [new THREE.TorusGeometry(R * 0.55, 0.3, 6, 48), '#ff4d4d', M.t(0, 0, 0)],
-    ];
-    const NS = 20;
-    for (let i = 0; i < NS; i++) {
-      const a = (i / NS) * Math.PI * 2;
-      for (const zz of [1.6, -1.6]) {
-        wparts.push([new THREE.BoxGeometry(0.22, R, 0.22), i % 2 ? '#ff4d4d' : '#ffffff', M.trs(Math.cos(a) * R * 0.5, Math.sin(a) * R * 0.5, zz, 0, 0, a - Math.PI / 2)]);
-      }
+    updaters.push(buildNavyPier(kit, placer, { shoreX, pierZ: pier.z, wheelX: fw.x, wheelZ: fw.z }));
+  }
+
+  /* ------------------------------------------------ signature skyline (reserve space first) */
+  for (const c of field.channels) for (let k = -c.halfLen; k < c.halfLen; k += 6) placer.reserve(c.cx + c.ax * k, c.cz + c.az * k, c.halfWidth + 4);
+  const land = (x: number, z: number, r: number) => {
+    placer.reserve(x, z, r);
+    return field.height(x, z);
+  };
+  willisTower(kit, -520, land(-520, 100, 32), 100);
+  hancockCenter(kit, -165, land(-165, 455, 30), 455, 0.12);
+  glassSpireTower(kit, -330, land(-330, 425, 26), 425, -0.25);
+  aonCenter(kit, -455, land(-455, -150, 26), -150);
+  wavyTower(kit, -440, land(-440, 330, 30), 330, 0.4);
+  tribuneTower(kit, -250, land(-250, 382, 18), 382, 0.15);
+  wrigleyBuilding(kit, -190, land(-173, 372, 32), 372, 0);
+  waterTowerCastle(kit, -110, land(-110, 300, 14), 300, 0.3);
+  merchMart(kit, -545, land(-545, 222, 62), 222);
+  marinaCity(kit, -276, land(-276, 192, 30), 192);
+  /* ------------------------------------------------ Millennium Park, Grant Park, the Loop */
+  cloudGate(kit, -95, land(-95, 95, 27), 95, 0.1);
+  crownFountain(kit, -48, land(-48, 10, 27), 10, 0);
+  pritzkerPavilion(kit, -160, land(-160, 55, 46), 20, 0);
+  artMuseum(kit, -40, land(-40, -112, 36), -112, Math.PI / 2);
+  {
+    const p = findSpot(placer, -215, -50, 15, 4) ?? { x: -215, z: -50 };
+    const yaw = faceRoad(placer, p.x, p.z);
+    picasso(kit, p.x, land(p.x, p.z, 15), p.z, yaw);
+  }
+  chicagoTheatre(kit, -30, land(-30, 200, 20), 192, Math.PI, ['CHICAGO GRAND PRIX', 'TODAY! ALL FAMILIES WELCOME']);
+  {
+    // SWEET HOME CHICAGO welcome billboard beside the grid, a blues club on the top straight and one downtown
+    const sh = findSpot(placer, 63, -80, 6, 10, 30);
+    if (sh) sweetHomeBillboard(kit, sh.x, land(sh.x, sh.z, 11), sh.z, faceRoad(placer, sh.x, sh.z) - 0.5);
+    else console.warn('no spot for the welcome billboard');
+    for (const [bx, bz] of [[-300, 352], [-378, 40]] as const) {
+      const p = findSpot(placer, bx, bz, 9, 6, 40);
+      if (p) bluesClub(kit, p.x, land(p.x, p.z, 10), p.z, faceRoad(placer, p.x, p.z));
     }
-    // rim lights
-    for (let i = 0; i < 64; i++) {
-      const a = (i / 64) * Math.PI * 2;
-      wparts.push([new THREE.SphereGeometry(0.42, 6, 4), i % 2 ? '#fff27a' : '#ff7ad9', M.t(Math.cos(a) * R, Math.sin(a) * R, 2.1)]);
-    }
-    const wheelMesh = new THREE.Mesh(bag.add(mergeColored(wparts)), bag.add(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.2, emissive: '#331a22', emissiveIntensity: 0.4 })));
-    wheelMesh.castShadow = true;
-    wheel.add(wheelMesh);
-    const NG = 24;
-    const gondGeo = bag.add(
-      mergeColored([
-        [new THREE.CylinderGeometry(1.5, 1.3, 2.6, 8), '#ffffff', M.t(0, -2.2, 0)],
-        [new THREE.CylinderGeometry(1.7, 1.7, 0.4, 8), '#ffffff', M.t(0, -0.8, 0)],
-        [new THREE.CylinderGeometry(1.52, 1.52, 1.0, 8), '#3b5f8a', M.t(0, -1.7, 0)],
-        [new THREE.BoxGeometry(0.2, 1.0, 0.2), '#888', M.t(0, -0.3, 0)],
-      ]),
-    );
-    const gond = new THREE.InstancedMesh(gondGeo, vc, NG);
-    gond.castShadow = true;
-    const gcol = ['#ff5a5a', '#ffb02e', '#ffe14d', '#4cd97b', '#3aa8ff', '#b26bff'];
-    for (let i = 0; i < NG; i++) gond.setColorAt(i, new THREE.Color(gcol[i % gcol.length]));
-    gond.position.y = hubY;
-    wheelRoot.add(gond);
-    gond.frustumCulled = false;
-    updaters.push((_dt, t) => {
-      const rot = t * 0.12;
-      wheel.rotation.z = rot;
-      for (let i = 0; i < NG; i++) {
-        const a = rot + (i / NG) * Math.PI * 2;
-        setInstance(gond, i, Math.cos(a) * R, Math.sin(a) * R, 0, 0, 0, Math.sin(t * 1.5 + i) * 0.05, 1);
-      }
-      gond.instanceMatrix.needsUpdate = true;
+  }
+  /* ------------------------------------------------ Museum Campus on the lake */
+  museumHall(kit, -70, land(-70, -305, 52), -305, 0);
+  sheddAquarium(kit, 40, land(40, -312, 38), -312, 0);
+  {
+    const ax = 150, az = -262;
+    kit.solid.push([new THREE.BoxGeometry(70, 4, 56), '#cfc6b2', M.t(ax - 5, -1.6, az)]);
+    kit.solid.push([new THREE.BoxGeometry(70, 0.3, 50), '#79b85a', M.t(ax - 5, 0.5, az)]);
+    kit.solid.push([new THREE.BoxGeometry(12, 3.6, 120), '#cfc6b2', M.t(shoreX + 12, -1.4, az - 20)]);
+    adlerPlanetarium(kit, ax, 0.5, az, 0);
+  }
+
+  /* ------------------------------------------------ elevated L (before generic towers so they keep clear) */
+  {
+    const l = lm('ltrain') ?? { x: -172, z: 230 };
+    elevatedL(kit, placer, {
+      a: [-430, l.z],
+      b: [62, l.z],
+      lines: lo ? [CTA.green] : quality === 'medium' ? [CTA.green, CTA.pink] : [CTA.green, CTA.pink, CTA.brown],
+      cars: lo ? 4 : 5,
+      stations: [{ at: 0.62, name: 'STATE/LAKE', color: CTA.green }, { at: 0.13, name: 'CLARK/LAKE', color: CTA.brown }],
+      period: 24,
     });
   }
 
-  /* ------------------------------------------------ skyline */
-  const facadeA = bag.add(windowTexture({ wall: '#f4f1ea', glass: '#5b84ad', glass2: '#86b2d9', seed: 3 }));
-  const facadeB = bag.add(windowTexture({ wall: '#e9e9ef', glass: '#3f6d9c', glass2: '#77a8d8', bands: true, seed: 4 }));
-  const facadeC = bag.add(windowTexture({ wall: '#efe4d2', glass: '#2c3e57', glass2: '#4b6a8f', frame: 0.3, seed: 5 }));
+  /* ------------------------------------------------ downtown streets under the skyline */
+  {
+    const cityTex = bag.add(canvasTexture(256, 256, (g, w, h, r) => {
+      g.fillStyle = '#5b5e64';
+      g.fillRect(0, 0, w, h);
+      g.fillStyle = '#c9c4ba';
+      g.fillRect(14, 14, w - 28, h - 28);
+      g.fillStyle = '#d9d4ca';
+      g.fillRect(22, 22, w - 44, h - 44);
+      g.fillStyle = '#e8e4da';
+      for (let i = 0; i < 4; i++) g.fillRect(2 + i * 4, 120, 2, 16);
+      g.fillStyle = '#f2f2f2';
+      for (let y = 0; y < h; y += 24) g.fillRect(5, y, 3, 12);
+      for (let x = 0; x < w; x += 24) g.fillRect(x, 5, 12, 3);
+      g.fillStyle = '#5fae4a';
+      for (let i = 0; i < 18; i++) {
+        g.beginPath();
+        g.arc(r.pick([18, w - 18]), r.range(30, h - 30), 5, 0, Math.PI * 2);
+        g.fill();
+      }
+    }, { seed: 12 }));
+    cityTex.repeat.set(1, 1);
+    const cityMat = bag.add(new THREE.MeshStandardMaterial({ map: cityTex, roughness: 0.95 }));
+    const rects: Array<[number, number, number, number]> = [[-960, -395, -540, 135], [-960, -395, 171, 740], [-395, -20, 352, 740], [-340, -110, -540, -276]];
+    const geos: THREE.BufferGeometry[] = [];
+    for (const [x0, x1, z0, z1] of rects) {
+      const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(-Math.PI / 2).translate((x0 + x1) / 2, 0.07, (z0 + z1) / 2);
+      const uv = g.attributes.uv as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, (x0 + uv.getX(i) * (x1 - x0)) / 64, (z0 + uv.getY(i) * (z1 - z0)) / 64);
+      geos.push(g);
+    }
+    const cm = new THREE.Mesh(bag.add(mergeGeometries(geos)!), cityMat);
+    cm.receiveShadow = true;
+    cm.name = 'downtownStreets';
+    group.add(cm);
+  }
+
+  /* ------------------------------------------------ generic downtown towers */
+  const facadeA = bag.add(windowTexture({ wall: '#f4f1ea', glass: '#4f86c0', glass2: '#86b2d9', seed: 3 }));
+  const facadeB = bag.add(windowTexture({ wall: '#dfe9f5', glass: '#3a74b4', glass2: '#77b0e8', bands: true, seed: 4 }));
+  const facadeC = bag.add(windowTexture({ wall: '#efe0c6', glass: '#2c3e57', glass2: '#4b6a8f', frame: 0.3, seed: 5 }));
   const matA = windowedMaterial(bag, facadeA, 12, 14);
-  const matB = windowedMaterial(bag, facadeB, 13, 14, { roughness: 0.3, metalness: 0.35 });
+  const matB = windowedMaterial(bag, facadeB, 13, 14, { roughness: 0.22, metalness: 0.45 });
   const matC = windowedMaterial(bag, facadeC, 10, 13);
   const box = bag.add(unitBox());
   const bA = new Batch(box, matA, { name: 'towersA' });
   const bB = new Batch(box, matB, { name: 'towersB' });
   const bC = new Batch(box, matC, { name: 'towersC' });
-  const palette = ['#f2e3c6', '#cfe3f2', '#ffd6c9', '#e8d2f5', '#d8f0dc', '#ffe9a8', '#c9d6ea', '#f5c6b8', '#ffffff', '#bfe0ff'];
+  const crownMat = bag.add(new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.3 }));
+  const crowns = new Batch(bag.add(new THREE.ConeGeometry(0.71, 1, 4, 1).rotateY(Math.PI / 4).translate(0, 0.5, 0)), crownMat, { name: 'crowns' });
+  const spires = new Batch(bag.add(new THREE.CylinderGeometry(0.15, 0.6, 1, 6).translate(0, 0.5, 0)), crownMat, { name: 'spires', cast: false });
+  const tanks = new Batch(bag.add(rooftopTankGeo()), vc, { name: 'rooftopTanks' });
+  const palette = ['#f2e3c6', '#cfe3f2', '#ffe2d2', '#e3ecff', '#d8f0e4', '#fff1c4', '#c9d6ea', '#f5d2c4', '#ffffff', '#bfe0ff', '#9fc6ee', '#d6c4a8'];
   const addTower = (x: number, z: number, w: number, d: number, h: number) => {
     const r = rng.next();
-    const batch = r < 0.4 ? bA : r < 0.75 ? bB : bC;
-    batch.add(x, 0, z, 0, w, h, d, rng.pick(palette));
-    // occasional setback crown
-    if (h > 70 && rng.chance(0.5)) batch.add(x, h, z, 0, w * 0.7, h * 0.12, d * 0.7, rng.pick(palette));
+    const batch = r < 0.36 ? bA : r < 0.74 ? bB : bC;
+    const tint = rng.pick(palette);
+    batch.add(x, 0, z, 0, w, h, d, tint);
+    const k = rng.next();
+    if (h > 105 && k < 0.4) crowns.add(x, h, z, 0, w * 0.98, Math.min(w, d) * 0.9, d * 0.98, rng.pick(['#2f7f6f', '#c9a24a', '#e8e8e8', '#9a2b2b', '#2b3f6b']));
+    else if (h > 70 && k < 0.75) {
+      batch.add(x, h, z, 0, w * 0.7, h * 0.13, d * 0.7, tint);
+      if (rng.chance(0.6)) spires.add(x, h * 1.13, z, 0, 1.4, rng.range(14, 30), 1.4, '#e8eef5');
+    } else if (h < 80 && k < 0.9) tanks.add(x + w * rng.range(-0.25, 0.25), h, z + d * rng.range(-0.25, 0.25), rng.next() * 6, 1.1);
   };
   const towers = (n: number, rect: { minX: number; maxX: number; minZ: number; maxZ: number }, hRange: [number, number], wRange: [number, number], margin: number) => {
     for (let i = 0; i < n; i++) {
@@ -219,80 +248,7 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
       }
     }
   };
-  // signature towers
-  const sig = new THREE.Group();
-  group.add(sig);
-  {
-    const dark = windowedMaterial(bag, bag.add(windowTexture({ wall: '#2c2f36', glass: '#4b5c74', glass2: '#6f86a6', frame: 0.18, seed: 8 })), 9, 14, { roughness: 0.35, metalness: 0.4 });
-    const white = windowedMaterial(bag, bag.add(windowTexture({ wall: '#f2f2ee', glass: '#9fb6cc', glass2: '#c5d6e6', frame: 0.35, seed: 9 })), 7, 14, { roughness: 0.5 });
-    const glass = windowedMaterial(bag, bag.add(windowTexture({ wall: '#b9cbe0', glass: '#6f97c3', glass2: '#9cc0e6', bands: true, seed: 10 })), 12, 14, { roughness: 0.15, metalness: 0.6 });
-    const add = (geo: THREE.BufferGeometry, mat: THREE.Material) => {
-      const m = new THREE.Mesh(bag.add(geo), mat);
-      m.castShadow = true;
-      m.receiveShadow = true;
-      sig.add(m);
-    };
-    // Willis (Sears) Tower: bundled tubes stepping back, twin white antennas
-    const willis = { x: -520, z: 100 };
-    const u = 13;
-    const tubes: Array<[number, number, number]> = [
-      [-1, -1, 160], [0, -1, 205], [1, -1, 160],
-      [-1, 0, 230], [0, 0, 270], [1, 0, 205],
-      [-1, 1, 160], [0, 1, 230], [1, 1, 270],
-    ];
-    for (const [i, j, h] of tubes) add(boxUV(u, h, u, willis.x + i * u, 0, willis.z + j * u), dark);
-    add(mergeColored([
-      [new THREE.CylinderGeometry(0.8, 1.2, 70, 6), '#f4f4f4', M.t(willis.x + 4, 270 + 35, willis.z + 6)],
-      [new THREE.CylinderGeometry(0.8, 1.2, 62, 6), '#f4f4f4', M.t(willis.x + u - 2, 270 + 31, willis.z + u + 6)],
-      [new THREE.CylinderGeometry(0.4, 0.4, 3, 6), '#ff3b3b', M.t(willis.x + 4, 270 + 71, willis.z + 6)],
-    ]), vc);
-    placer.reserve(willis.x, willis.z, 30);
-    // John Hancock: tapered black tower with X-bracing and two antennas
-    const hk = { x: -330, z: 520 };
-    {
-      const g = new THREE.CylinderGeometry(15, 24, 240, 4, 1).rotateY(Math.PI / 4).translate(0, 120, 0);
-      const uv = g.attributes.uv as THREE.BufferAttribute;
-      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 4 * 30, uv.getY(i) * 240);
-      g.translate(hk.x, 0, hk.z);
-      add(g, dark);
-      const xs: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [];
-      for (let k = 0; k < 5; k++) {
-        const y0 = k * 48 + 24;
-        const halfW = 24 - (y0 / 240) * 9 + 0.6;
-        for (const side of [-1, 1]) {
-          xs.push([new THREE.BoxGeometry(1.0, 66, 0.8), '#15171b', M.trs(hk.x, y0, hk.z + side * halfW, 0.62, 0, 0)]);
-          xs.push([new THREE.BoxGeometry(1.0, 66, 0.8), '#15171b', M.trs(hk.x, y0, hk.z + side * halfW, -0.62, 0, 0)]);
-          xs.push([new THREE.BoxGeometry(0.8, 66, 1.0), '#15171b', M.trs(hk.x + side * halfW, y0, hk.z, 0, 0, 0.62)]);
-          xs.push([new THREE.BoxGeometry(0.8, 66, 1.0), '#15171b', M.trs(hk.x + side * halfW, y0, hk.z, 0, 0, -0.62)]);
-        }
-      }
-      xs.push([new THREE.CylinderGeometry(0.7, 1.0, 70, 6), '#e8e8e8', M.t(hk.x - 5, 275, hk.z)]);
-      xs.push([new THREE.CylinderGeometry(0.7, 1.0, 70, 6), '#e8e8e8', M.t(hk.x + 5, 275, hk.z)]);
-      add(mergeColored(xs), vc);
-      placer.reserve(hk.x, hk.z, 30);
-    }
-    // Aon Center: tall white slab
-    const aon = { x: -455, z: -150 };
-    add(boxUV(26, 230, 26, aon.x, 0, aon.z), white);
-    placer.reserve(aon.x, aon.z, 25);
-    // Trump-ish tower: stepped glass with a spire
-    const tr = { x: -430, z: 360 };
-    add(boxUV(30, 140, 22, tr.x, 0, tr.z), glass);
-    add(boxUV(24, 70, 18, tr.x + 2, 140, tr.z), glass);
-    add(boxUV(17, 50, 14, tr.x + 3, 210, tr.z), glass);
-    add(mergeColored([[new THREE.CylinderGeometry(0.4, 1.4, 50, 6), '#dfe6ee', M.t(tr.x + 3, 285, tr.z)]]), vcGloss);
-    placer.reserve(tr.x, tr.z, 26);
-    // Wrigley-ish clock tower near the river
-    add(boxUV(18, 70, 18, -260, 0, 420), white);
-    add(mergeColored([
-      [new THREE.BoxGeometry(14, 22, 14), '#f7f3e8', M.t(-260, 81, 420)],
-      [new THREE.CylinderGeometry(4, 7, 16, 8), '#f7f3e8', M.t(-260, 100, 420)],
-      [new THREE.ConeGeometry(4, 12, 8), '#f7f3e8', M.t(-260, 114, 420)],
-      [new THREE.CylinderGeometry(4, 4, 0.5, 16).rotateX(Math.PI / 2), '#20324f', M.t(-260, 84, 427.2)],
-    ]), vc);
-    placer.reserve(-260, 420, 16);
-  }
-  const nT = quality === 'high' ? 1 : quality === 'medium' ? 0.75 : 0.5;
+  const nT = quality === 'high' ? 1 : quality === 'medium' ? 0.7 : 0.45;
   towers(Math.round(140 * nT), { minX: -820, maxX: -390, minZ: -420, maxZ: 560 }, [60, 150], [16, 30], 10);
   towers(Math.round(60 * nT), { minX: -420, maxX: -40, minZ: 360, maxZ: 640 }, [40, 120], [16, 28], 10);
   towers(Math.round(25 * nT), { minX: -420, maxX: -360, minZ: -300, maxZ: 340 }, [30, 80], [14, 22], 10);
@@ -300,6 +256,10 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
   bA.build(group);
   bB.build(group);
   bC.build(group);
+  crowns.build(group);
+  spires.build(group);
+  tanks.build(group);
+
 
   /* ------------------------------------------------ CHICAGO start arch */
   {
@@ -405,9 +365,20 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     const frames = new Batch(frameGeo, vc);
     const L = track.length;
     const spots = placer.along(0, 30, 5, 13, { side: 1, from: L - 150, to: L - 20 }).concat(placer.along(0, 30, 5, 13, { side: 1, from: 30, to: 110 }));
+    const fanCols = ['#e8443a', '#2f7de1', '#ffd23f', '#3ccf6e', '#ffffff', '#ff8a3d', '#b05cf0', '#41B6E6', '#ff5fa2', '#E4002B'];
+    const rowsStep = hi ? 1 : 2;
     for (const s of spots) {
       seats.add(s.x, s.y, s.z, s.yaw);
       frames.add(s.x, s.y, s.z, s.yaw);
+      if (lo) continue;
+      const cs = Math.cos(s.yaw), sn = Math.sin(s.yaw);
+      for (let r = 0; r < 6; r += rowsStep) {
+        for (let lx = -11; lx <= 11; lx += hi ? 1.25 : 1.9) {
+          if (rng.chance(0.15)) continue;
+          const lz = -r * 1.4 - 0.75, ly = 1 + r * 1.1;
+          kit.person(s.x + cs * lx + sn * lz, s.y + ly, s.z - sn * lx + cs * lz, s.yaw, rng.pick(fanCols), 0.9);
+        }
+      }
     }
     seats.build(group);
     frames.build(group);
@@ -416,113 +387,7 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
   /* ------------------------------------------------ Buckingham Fountain */
   {
     const fo = lm('fountain') ?? { x: -250, z: 80 };
-    placer.reserve(fo.x, fo.z, 34);
-    const pink = '#f1c6b5';
-    const fparts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [
-      [new THREE.CylinderGeometry(26, 26.5, 1.2, 48), pink, M.t(fo.x, 0.6, fo.z)],
-      [new THREE.CylinderGeometry(9, 11, 3, 24), pink, M.t(fo.x, 1.5, fo.z)],
-      [new THREE.CylinderGeometry(10, 8, 1.2, 24), pink, M.t(fo.x, 3.6, fo.z)],
-      [new THREE.CylinderGeometry(4, 5, 3, 16), pink, M.t(fo.x, 5.5, fo.z)],
-      [new THREE.CylinderGeometry(6, 4.5, 1, 20), pink, M.t(fo.x, 7.4, fo.z)],
-      [new THREE.CylinderGeometry(1.6, 2.4, 3, 12), pink, M.t(fo.x, 9.2, fo.z)],
-      [new THREE.CylinderGeometry(3, 2, 0.8, 16), pink, M.t(fo.x, 10.9, fo.z)],
-    ];
-    // sea horses
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      fparts.push([new THREE.CylinderGeometry(0.9, 1.3, 3, 8), '#5f8f7a', M.trs(fo.x + Math.cos(a) * 17, 2.2, fo.z + Math.sin(a) * 17, 0.3 * Math.sin(a), 0, -0.3 * Math.cos(a))]);
-    }
-    // plaza ring + flower beds
-    fparts.push([new THREE.CylinderGeometry(36, 36, 0.3, 48), '#e9dcc3', M.t(fo.x, 0.05, fo.z)]);
-    const fm = new THREE.Mesh(bag.add(mergeColored(fparts)), vc);
-    fm.castShadow = fm.receiveShadow = true;
-    group.add(fm);
-    const basinWater = new THREE.Mesh(bag.add(new THREE.CircleGeometry(25.6, 48)), lakeMat);
-    basinWater.rotation.x = -Math.PI / 2;
-    basinWater.position.set(fo.x, 1.05, fo.z);
-    group.add(basinWater);
-    const tier = new THREE.Mesh(bag.add(new THREE.CircleGeometry(9.5, 24)), lakeMat);
-    tier.rotation.x = -Math.PI / 2;
-    tier.position.set(fo.x, 4.25, fo.z);
-    group.add(tier);
-    // central jet: animated translucent column
-    const jetMat = bag.add(new THREE.MeshStandardMaterial({ color: '#e6f6ff', transparent: true, opacity: 0.7, roughness: 0.1, emissive: '#9fd8ff', emissiveIntensity: 0.3, depthWrite: false }));
-    const jet = new THREE.Mesh(bag.add(new THREE.CylinderGeometry(0.4, 1.0, 1, 10, 1, true).translate(0, 0.5, 0)), jetMat);
-    jet.position.set(fo.x, 11.2, fo.z);
-    group.add(jet);
-    // spray particles (GPU animated)
-    const N = quality === 'low' ? 300 : 900;
-    const pg = new THREE.BufferGeometry();
-    const seeds = new Float32Array(N * 4);
-    const velArr: number[] = [];
-    for (let i = 0; i < N; i++) {
-      const kind = i < N * 0.35 ? 0 : i < N * 0.75 ? 1 : 2; // 0 central, 1 rim ring, 2 seahorses
-      let ox = 0, oz = 0, ang = rng.next() * Math.PI * 2, vy = 0, vh = 0;
-      if (kind === 0) {
-        vy = rng.range(17, 21);
-        vh = rng.range(0.4, 1.8);
-      } else if (kind === 1) {
-        const a = rng.next() * Math.PI * 2;
-        ox = Math.cos(a) * 9.5;
-        oz = Math.sin(a) * 9.5;
-        ang = a + Math.PI;
-        vy = rng.range(6, 8);
-        vh = rng.range(2.5, 3.5);
-      } else {
-        const a = (rng.int(4) / 4) * Math.PI * 2 + Math.PI / 4;
-        ox = Math.cos(a) * 17;
-        oz = Math.sin(a) * 17;
-        ang = a + Math.PI + rng.range(-0.08, 0.08);
-        vy = rng.range(7, 8.5);
-        vh = rng.range(4.5, 5.5);
-      }
-      seeds[i * 4] = ox + Math.cos(ang) * 0.001;
-      seeds[i * 4 + 1] = oz;
-      seeds[i * 4 + 2] = ang;
-      seeds[i * 4 + 3] = rng.next();
-      velArr.push(vy, vh, kind === 0 ? 11.4 : kind === 1 ? 4.6 : 3.4);
-    }
-    const vel = new Float32Array(velArr);
-    pg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(N * 3), 3));
-    pg.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 4));
-    pg.setAttribute('aVel', new THREE.BufferAttribute(vel, 3));
-    pg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 10, 0), 40);
-    bag.add(pg);
-    const sprite = bag.add(dotTexture('rgba(255,255,255,1)', 'rgba(200,235,255,0)'));
-    const pm = bag.add(
-      new THREE.ShaderMaterial({
-        transparent: true,
-        depthWrite: false,
-        uniforms: { uTime: timeU, uMap: { value: sprite } },
-        vertexShader: `attribute vec4 aSeed; attribute vec3 aVel; uniform float uTime; varying float vA;
-          void main(){
-            float life = fract(uTime * 0.55 + aSeed.w);
-            float t = life * 2.2;
-            vec3 p = vec3(aSeed.x, aVel.z, aSeed.y);
-            p.x += cos(aSeed.z) * aVel.y * t;
-            p.z += sin(aSeed.z) * aVel.y * t;
-            p.y += aVel.x * t - 0.5 * 18.0 * t * t;
-            vA = smoothstep(0.0, 0.08, life) * (1.0 - smoothstep(0.75, 1.0, life)) * step(1.0, p.y);
-            vec4 mv = modelViewMatrix * vec4(p, 1.0);
-            gl_Position = projectionMatrix * mv;
-            gl_PointSize = (2.4 + life * 2.6) * (300.0 / -mv.z);
-          }`,
-        fragmentShader: `uniform sampler2D uMap; varying float vA;
-          void main(){ vec4 c = texture2D(uMap, gl_PointCoord); gl_FragColor = vec4(vec3(0.92,0.97,1.0), c.a * vA * 0.85); }`,
-      }),
-    );
-    const pts = new THREE.Points(pg, pm);
-    pts.position.set(fo.x, 0, fo.z);
-    group.add(pts);
-    updaters.push((_dt, t) => {
-      jet.scale.set(1, 9 + Math.sin(t * 2.1) * 1.6, 1);
-    });
-  }
-
-  /* ------------------------------------------------ elevated L train */
-  {
-    const l = lm('ltrain') ?? { x: -172, z: 230 };
-    updaters.push(elevatedTrain(group, bag, placer, { x0: -480, x1: 60, z: l.z }));
+    buildBuckingham(kit, placer, fo.x, fo.z, lakeMat);
   }
 
   /* ------------------------------------------------ river bridge at the gap */
@@ -564,12 +429,82 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
           const ox = -c.az * side * (c.halfWidth + 1), oz = c.ax * side * (c.halfWidth + 1);
           parts.push([new THREE.BoxGeometry(c.halfLen * 2, 7.2, 1.2), '#bdb6a6', M.trs(c.cx + ox, -3.3, c.cz + oz, 0, -Math.atan2(c.az, c.ax), 0)]);
         }
-        for (let k = -c.halfLen; k < c.halfLen; k += 6) placer.reserve(c.cx + c.ax * k, c.cz + c.az * k, c.halfWidth + 4);
       }
       const bm = new THREE.Mesh(bag.add(mergeColored(parts)), vcGloss);
       bm.castShadow = bm.receiveShadow = true;
       group.add(bm);
     }
+  }
+
+  /* ------------------------------------------------ the river: dyed St. Patrick's green, bascule bridges, Riverwalk, tour boats */
+  for (const c of field.channels) {
+    const ang = -Math.atan2(c.az, c.ax);
+    const base = M.trs(c.cx, 0, c.cz, 0, ang, 0); // local x along the river, z across
+    const at = (lx: number, ly: number, lz: number, ry = 0, rx = 0, rz = 0) => base.clone().multiply(M.trs(lx, ly, lz, rx, ry, rz));
+    const greenTex = bag.add(waterTexture('#13b24a', '#9dffb5', 91));
+    greenTex.repeat.set((c.halfLen * 2) / 14, (c.halfWidth * 2) / 14);
+    const greenMat = bag.add(new THREE.MeshStandardMaterial({ color: '#2fe06a', map: greenTex, roughness: 0.12, metalness: 0.15, emissive: '#0b5a26', emissiveIntensity: 0.35 }));
+    const river = new THREE.Mesh(bag.add(new THREE.PlaneGeometry(c.halfLen * 2 + 4, c.halfWidth * 2 + 2).rotateX(-Math.PI / 2)), greenMat);
+    river.applyMatrix4(at(0, -2.05, 0));
+    river.receiveShadow = true;
+    river.name = 'greenRiver';
+    group.add(river);
+    updaters.push((dt) => {
+      greenTex.offset.x -= dt * 0.03;
+    });
+    // Riverwalk ledges with planters and umbrellas
+    for (const side of [-1, 1]) {
+      kit.solid.push([new THREE.BoxGeometry(c.halfLen * 2, 0.5, 2.4), '#d8cfbd', at(0, -0.95, side * (c.halfWidth - 0.4))]);
+      for (let lx = -c.halfLen + 8; lx < c.halfLen - 8; lx += 16) {
+        if (Math.abs(lx - 5) < 18) continue; // keep clear under the jump
+        kit.solid.push([new THREE.CylinderGeometry(0.05, 0.05, 2.2, 4), '#dddddd', at(lx, 0.4, side * (c.halfWidth - 0.6))]);
+        kit.solid.push([new THREE.ConeGeometry(1.3, 0.6, 8), rng.pick(['#e8392b', '#ffd23f', '#1f8f3a', '#2f7de1']), at(lx, 1.6, side * (c.halfWidth - 0.6))]);
+      }
+    }
+    // decorative bascule bridges (leaves raised) up and down the river
+    for (const bx of [-c.halfLen + 30, c.halfLen - 34]) {
+      for (const side of [-1, 1]) {
+        const leaf = at(bx, 0.2, side * (c.halfWidth + 1), 0, side * 1.0, 0);
+        kit.gloss.push([new THREE.BoxGeometry(10, 0.7, 9.5), '#6b6f76', leaf.clone().multiply(M.t(0, 0, -side * 4.75))]);
+        for (const tx of [-4.6, 4.6]) {
+          kit.gloss.push([new THREE.BoxGeometry(0.6, 2.2, 9.5), '#b3202a', leaf.clone().multiply(M.t(tx, 1.1, -side * 4.75))]);
+          for (let k = 0; k < 4; k++) beam(kit.gloss, [tx, 0.2, -side * (k * 2.3 + 0.2)], [tx, 2.1, -side * (k * 2.3 + 1.3)], 0.25, '#b3202a', leaf);
+        }
+        // tender house
+        kit.solid.push([new THREE.BoxGeometry(5, 6, 5), '#e8dcc0', at(bx + 9, 3, side * (c.halfWidth + 5))]);
+        kit.solid.push([new THREE.ConeGeometry(4, 3, 4).rotateY(Math.PI / 4), '#3f8f7a', at(bx + 9, 7.5, side * (c.halfWidth + 5))]);
+        kit.solid.push([new THREE.BoxGeometry(1.6, 1.6, 0.2), '#1d2b3f', at(bx + 9, 3.6, side * (c.halfWidth + 5) - side * 2.55)]);
+      }
+    }
+    // tour boats cruising under the jump
+    const boatGeo2 = bag.add(mergeColored([
+      [new THREE.BoxGeometry(11, 1.4, 3.8), '#ffffff', M.t(0, 0.4, 0)],
+      [new THREE.ConeGeometry(1.9, 2.4, 4).rotateZ(-Math.PI / 2).rotateX(Math.PI / 4), '#ffffff', M.trs(6.6, 0.4, 0, 0, 0, 0, 1, 0.52, 1.4)],
+      [new THREE.BoxGeometry(11.1, 0.3, 3.9), '#1b2f5c', M.t(0, 1.0, 0)],
+      [new THREE.BoxGeometry(6, 1.3, 3.2), '#eef3f8', M.t(-1.5, 1.8, 0)],
+      [new THREE.BoxGeometry(5.6, 0.7, 3.25), '#33506e', M.t(-1.5, 1.9, 0)],
+      [new THREE.BoxGeometry(6.4, 0.15, 3.6), '#ffd23f', M.t(-1.5, 2.5, 0)],
+    ]));
+    const NB = lo ? 1 : 2;
+    const boatsIM = new THREE.InstancedMesh(boatGeo2, tintMaskMat(bag, { roughness: 0.4 }), NB);
+    boatsIM.setColorAt(0, new THREE.Color('#e8f4ff'));
+    if (NB > 1) boatsIM.setColorAt(1, new THREE.Color('#fff4d6'));
+    boatsIM.frustumCulled = false;
+    boatsIM.castShadow = true;
+    group.add(boatsIM);
+    const tmpM = new THREE.Matrix4();
+    updaters.push((_dt, t) => {
+      for (let i = 0; i < NB; i++) {
+        const span = c.halfLen * 2 - 24;
+        const ph = ((t / 40 + i * 0.5) % 2);
+        const f = ph < 1 ? ph : 2 - ph;
+        const lx = -span / 2 + f * span;
+        const yaw = ph < 1 ? 0 : Math.PI;
+        tmpM.copy(base).multiply(M.trs(lx, -1.85 + Math.sin(t * 1.4 + i) * 0.06, (i ? 1 : -1) * 2.6, 0, yaw, Math.sin(t + i) * 0.02));
+        boatsIM.setMatrixAt(i, tmpM);
+      }
+      boatsIM.instanceMatrix.needsUpdate = true;
+    });
   }
 
   /* ------------------------------------------------ flags */
@@ -595,37 +530,79 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     chk.build(group);
   }
 
-  /* ------------------------------------------------ billboards */
+  /* ------------------------------------------------ billboards (one atlas, one draw call) */
   {
     const boards = [
-      textTexture('DEEP DISH PIZZA', { w: 1024, h: 256, bg: '#ffd23f', fg: '#c62828', border: '#c62828' }),
-      textTexture('GO TEAM FAMILY!', { w: 1024, h: 256, bg: '#1f4fbf', fg: '#ffffff', border: '#ffd23f' }),
-      textTexture('CHICAGO-STYLE HOT DOGS', { w: 1024, h: 256, bg: '#3ccf6e', fg: '#ffffff', border: '#ffd23f', font: '900 104px "Arial Black", Impact, sans-serif' }),
-      textTexture('WINDY CITY GP', { w: 1024, h: 256, bg: '#d7262e', fg: '#ffffff', border: '#ffffff' }),
-    ].map((t) => bag.add(t));
-    const frameGeo = bag.add(mergeColored([
+      kit.paint.text('DEEP DISH PIZZA', 512, 128, { bg: '#ffd23f', fg: '#c62828', border: '#c62828' }),
+      kit.paint.text('GO TEAM FAMILY!', 512, 128, { bg: '#1f4fbf', fg: '#ffffff', border: '#ffd23f' }),
+      kit.paint.text('CHICAGO-STYLE HOT DOGS', 512, 128, { bg: '#3ccf6e', fg: '#ffffff', border: '#ffd23f', stroke: '#1f6b3a' }),
+      kit.paint.text('WINDY CITY GP', 512, 128, { bg: '#d7262e', fg: '#ffffff', border: '#ffffff' }),
+      kit.paint.draw(512, 128, (g, w, h) => {
+        drawChicagoFlag(g, 0, 0, w, h);
+      }, 'bbFlag'),
+      kit.paint.text('THE WINDY CITY\nWELCOMES RACERS', 512, 128, { bg: '#41B6E6', fg: '#ffffff', stroke: '#1d5f86' }),
+      kit.paint.text('ITALIAN BEEF\nDIPPED + HOT', 512, 128, { bg: '#ffffff', fg: '#c8102e', border: '#1f8f3a' }),
+      kit.paint.text('LAKE SHORE DRIVE', 512, 128, { bg: '#1d6b3a', fg: '#ffffff', border: '#ffffff' }),
+    ];
+    const frameGeo = mergeColored([
       [new THREE.BoxGeometry(0.4, 5, 0.4), '#555', M.t(-5.5, 2.5, -0.3)],
       [new THREE.BoxGeometry(0.4, 5, 0.4), '#555', M.t(5.5, 2.5, -0.3)],
       [new THREE.BoxGeometry(12.6, 3.6, 0.3), '#222', M.t(0, 5.6, -0.2)],
-    ]));
-    const frames = new Batch(frameGeo, vc);
-    const panelGeo = bag.add(new THREE.PlaneGeometry(12, 3).translate(0, 5.6, 0));
-    const spots = placer.along(0, 140, 2, 7, { side: 0 });
+    ]);
+    const frames = kit.batch(frameGeo, vc, { name: 'billboardFrames' });
+    const spots = placer.along(0, lo ? 220 : 140, 2, 7, { side: 0 });
     spots.forEach((s, i) => {
       frames.add(s.x, s.y, s.z, s.yaw);
-      const m = new THREE.Mesh(panelGeo, bag.add(new THREE.MeshStandardMaterial({ map: boards[i % boards.length], emissive: '#ffffff', emissiveMap: boards[i % boards.length], emissiveIntensity: 0.15 })));
-      m.position.set(s.x, s.y, s.z);
-      m.rotation.y = s.yaw;
-      group.add(m);
+      kit.paint.quad(boards[i % boards.length], 12, 3, M.trs(s.x, s.y + 5.6, s.z, 0, s.yaw, 0));
     });
-    frames.build(group);
   }
 
-  /* ------------------------------------------------ lamps */
+  /* ------------------------------------------------ lamps with Chicago banners */
   {
     const lamps = new Batch(bag.add(PROPS.lamp('#2b3445', '#fff6d0')), vc, { name: 'lamps' });
-    for (const s of placer.along(0, 48, 1.2, 0.6, { jitter: 0 })) lamps.add(s.x, s.y, s.z, s.yaw);
+    const banners = lo ? null : bannerBatch(kit);
+    for (const s of placer.along(0, 48, 1.2, 0.6, { jitter: 0 })) {
+      lamps.add(s.x, s.y, s.z, s.yaw);
+      banners?.add(s.x, s.y + 4.4, s.z, s.yaw - Math.PI / 2);
+    }
     lamps.build(group);
+  }
+
+  /* ------------------------------------------------ street food, bus shelters, bikes + fans */
+  {
+    const shirt = ['#e8443a', '#2f7de1', '#ffd23f', '#3ccf6e', '#ffffff', '#ff8a3d', '#b05cf0', '#41B6E6', '#14315e', '#ff5fa2'];
+    const stands = [hotDogStand, pizzeria, hotDogStand, beefStand, popcornShop];
+    const spots = placer.along(0, lo ? 320 : 170, 6.5, 6.5, { side: 0 });
+    spots.forEach((s, i) => {
+      stands[i % stands.length](kit, s.x, s.y, s.z, s.yaw);
+      if (!lo) {
+        const n = hi ? 4 : 2;
+        for (let p = 0; p < n; p++) {
+          const lx = -2.5 + p * 1.6 + rng.range(-0.3, 0.3), lz = 4.2 + rng.range(-0.4, 0.6);
+          const cx = s.x + Math.cos(s.yaw) * lx + Math.sin(s.yaw) * lz, cz = s.z - Math.sin(s.yaw) * lx + Math.cos(s.yaw) * lz;
+          kit.person(cx, field.height(cx, cz), cz, s.yaw + Math.PI + rng.range(-0.5, 0.5), rng.pick(shirt));
+        }
+      }
+    });
+    if (hi) {
+      const shelters = kit.batch(busShelterGeo(), vc, { name: 'busShelters' });
+      for (const s of placer.along(0, 210, 3.5, 3)) shelters.add(s.x, s.y, s.z, s.yaw);
+      const bikes = kit.batch(bikeDockGeo(), vc, { name: 'bikes', cast: false });
+      for (const s of placer.along(0, 260, 3.5, 3.6)) bikes.add(s.x, s.y, s.z, s.yaw);
+    }
+    if (!lo) {
+      // fans around the Bean and at the Crown Fountain pool
+      const bean = { x: -95, z: 95 };
+      for (let i = 0; i < (hi ? 26 : 12); i++) {
+        const a = rng.next() * Math.PI * 2, d = rng.range(13, 22);
+        const x = bean.x + Math.cos(a) * d, z = bean.z + Math.sin(a) * d;
+        kit.person(x, field.height(x, z) + 0.4, z, Math.atan2(bean.x - x, bean.z - z), rng.pick(shirt), rng.range(0.7, 1));
+      }
+      for (let i = 0; i < (hi ? 14 : 6); i++) {
+        const x = -48 + rng.range(-14, 14), z = 10 + rng.range(-3, 3);
+        kit.person(x, field.height(x, z) + 0.3, z, rng.next() * 6, rng.pick(shirt), rng.range(0.55, 0.8));
+      }
+    }
   }
 
   /* ------------------------------------------------ trees, bushes, benches (Grant Park + lakefront) */
@@ -656,8 +633,8 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     treeA.build(group);
     treeB.build(group);
     bushes.build(group);
-    flowers.build(group);
-    benches.build(group);
+    if (!lo) flowers.build(group);
+    if (hi) benches.build(group);
   }
 
   /* ------------------------------------------------ beach with umbrellas north of the pier */
@@ -681,7 +658,15 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
       towels.add(x + 1.6, -0.75, z + rng.range(-1, 1), rng.range(-0.3, 0.3), 1, 1, 1, rng.pick(cols));
     }
     umbrellas.build(group);
-    towels.build(group);
+    if (!lo) towels.build(group);
+    if (hi) {
+      const guards = kit.batch(lifeguardGeo(), vc, { name: 'lifeguards' });
+      for (let z = bz0 + 30; z < bz1 - 20; z += 95) guards.add(shoreX + 13, -0.75, z, -Math.PI / 2);
+    }
+    const beachSign = kit.paint.text('OAK STREET BEACH', 512, 96, { bg: '#ffd23f', fg: '#1d4f9c', border: '#1d4f9c' });
+    kit.paint.quad(beachSign, 10, 1.9, M.trs(shoreX - 2, 3.2, bz0 + 14, 0, -Math.PI / 2, 0), true);
+    kit.solid.push([new THREE.BoxGeometry(0.3, 3, 0.3), '#555', M.t(shoreX - 2, 1.0, bz0 + 9.5)]);
+    kit.solid.push([new THREE.BoxGeometry(0.3, 3, 0.3), '#555', M.t(shoreX - 2, 1.0, bz0 + 18.5)]);
   }
 
   /* ------------------------------------------------ seagulls */
@@ -719,10 +704,16 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
   const cloudUpdate = addClouds(ctx, bag, quality === 'low' ? 10 : 22, [150, 260], 1400, '#ffffff', 31);
   updaters.push(cloudUpdate);
 
+  if (!lo) windGusts(kit, ['#7cc65a', '#c9e265', '#f2b13c', '#e0882c', '#ffffff'], hi ? 420 : 200, { speed: 10 });
+  kit.flush();
+
+  trimShadows(group, quality);
+
   return {
     update(dt: number, time: number) {
       timeU.value = time;
       for (const u of updaters) u(dt, time);
+      kit.update(dt, time);
     },
     dispose() {
       disposeGroup(group);

@@ -89,7 +89,7 @@ export const SNOW: TrackDef = {
     { kind: 'lighthouse', x: 420, z: 120 },
   ],
   lighting: {
-    skyTop: '#26305e', skyBottom: '#e89a7a', fog: '#8f8fae', fogNear: 120, fogFar: 750,
+    skyTop: '#26305e', skyBottom: '#e89a7a', fog: '#8f8fae', fogNear: 140, fogFar: 950,
     sun: '#ffb38a', sunIntensity: 1.5, ambient: '#9fb4e6', ground: '#e6edf6',
   },
   music: { tempo: 136, root: 57, scale: 'minor', style: 'sleigh' },

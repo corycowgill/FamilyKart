@@ -57,7 +57,7 @@ export class HUD {
         special: h('div', { class: 'special' }),
         board: h('div', { class: 'board' }),
         minimap: h('canvas', { class: 'minimap', width: 220, height: 220 }),
-        center: h('div', { class: 'center-msg' }),
+        center: h('div', { class: 'center-msg marquee' }),
         toast: h('div', { class: 'toast' }),
         wrong: h('div', { class: 'wrong-way' }, 'WRONG WAY!'),
         lastPlace: k.place,
@@ -92,15 +92,16 @@ export class HUD {
         this.views.forEach((v) => this.flash(v.center, 'GO!'));
         break;
       case 'finalLap':
-        this.forKart(e.kart, (v) => this.toast(v, '🏁 FINAL LAP! 🏁'));
+        this.forKart(e.kart, (v) => this.toast(v, '🔔 FINAL LAP! 🔔'));
         break;
       case 'lap':
         this.forKart(e.kart, (v) => this.toast(v, `Lap ${e.lap}  ·  ${formatTime(e.time)}`));
         break;
       case 'finish':
         this.forKart(e.kart, (v) => {
-          v.center.textContent = e.place === 1 ? '🏆 1st! 🏆' : `FINISH! ${e.place}${ordinal(e.place)}`;
-          v.center.className = 'center-msg sticky';
+          const cheer = e.place === 1 ? 'Sweet win, Chicago!' : e.place <= 3 ? 'Chicago proud!' : 'Next train: rematch!';
+          v.center.innerHTML = `${e.place === 1 ? '🏆 1st! 🏆' : `FINISH! ${e.place}${ordinal(e.place)}`}<small>★ ${cheer} ★</small>`;
+          v.center.className = 'center-msg marquee sticky';
         });
         break;
       case 'driftTier':
@@ -124,9 +125,9 @@ export class HUD {
 
   private flash(el: HTMLElement, text: string): void {
     el.textContent = text;
-    el.className = 'center-msg';
+    el.className = 'center-msg marquee';
     void el.offsetWidth;
-    el.className = 'center-msg show';
+    el.className = 'center-msg marquee show';
   }
 
   private toast(v: View, text: string): void {
@@ -151,8 +152,15 @@ export class HUD {
         }
         v.lastPlace = place;
       }
-      const lapTxt = `LAP ${sim.displayLap(k)}/${sim.laps}`;
-      if (v.lap.firstChild?.textContent !== lapTxt) v.lap.innerHTML = `${lapTxt}<small>${k.lastLapTime ? 'Last ' + formatTime(k.lastLapTime) : ''}</small>`;
+      // L-platform arrival board: "LAP 2/3 · Next: Final Lap" (rebuilt only when it changes)
+      const lap = sim.displayLap(k);
+      const lapTxt = `LAP ${lap}/${sim.laps}`;
+      const lapKey = `${lapTxt}|${k.finished ? 1 : 0}`;
+      if (v.lap.dataset.k !== lapKey) {
+        v.lap.dataset.k = lapKey;
+        const next = k.finished ? 'Arrived! ★' : lap >= sim.laps ? 'Finish 🏁' : lap === sim.laps - 1 ? 'Final Lap' : `Lap ${lap + 1}`;
+        v.lap.innerHTML = `<span class="lap-n">${lapTxt}</span><small>${k.finished ? '' : 'Next: '}<b>${next}</b></small>`;
+      }
       const raceT = k.finished ? k.finishTime : Math.max(0, sim.time);
       v.timer.innerHTML = `${formatTime(raceT)}<small>${isFinite(k.bestLapTime) ? 'Best lap ' + formatTime(k.bestLapTime) : ''}</small>`;
       v.speed.innerHTML = `${Math.round(Math.abs(k.forwardSpeed) * 3.6)}<small> km/h</small>`;

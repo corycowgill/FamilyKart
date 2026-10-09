@@ -4,7 +4,7 @@ import type { KartState } from '../sim/types';
 import { buildCharacter } from './models/characterModels';
 import { buildKart } from './models/kartModels';
 import type { CharacterRig, KartRig } from './models/types';
-import type { Effects } from './Particles';
+import { sprayColor, type Effects } from './Particles';
 
 const DRIFT_COLORS = ['#fff4d0', '#4fb4ff', '#ff9a2e', '#c45cff'];
 const tmp = new THREE.Vector3();
@@ -17,6 +17,8 @@ export class KartView {
   private wheelSpin = 0;
   private shield: THREE.Mesh;
   private flames: THREE.Mesh[] = [];
+  private flameCores: THREE.Mesh[] = [];
+  private flameGlows: THREE.Sprite[] = [];
   private lean = 0;
   private pitch = 0;
   private hopOffset = 0;
@@ -41,12 +43,27 @@ export class KartView {
     this.shield.visible = false;
     this.root.add(this.shield);
 
-    const flameMat = new THREE.MeshBasicMaterial({ color: '#ffb02e', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+    // layered boost flame: coloured outer cone + white-hot core + additive glow sprite (blooms)
+    const flameMat = new THREE.MeshBasicMaterial({ color: '#ffb02e', transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false });
+    const coreMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff4c8').multiplyScalar(2.2), transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+    const glowTex = makeGlowTexture();
     for (const ex of this.kart.exhausts) {
-      const f = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.2, 10).rotateX(-Math.PI / 2).translate(0, 0, -0.6), flameMat.clone());
+      const f = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.2, 10, 1, true).rotateX(-Math.PI / 2).translate(0, 0, -0.6), flameMat.clone());
       f.visible = false;
+      f.renderOrder = 6;
       ex.add(f);
       this.flames.push(f);
+      const core = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.65, 8, 1, true).rotateX(-Math.PI / 2).translate(0, 0, -0.32), coreMat);
+      core.renderOrder = 7;
+      f.add(core);
+      this.flameCores.push(core);
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#ffb02e', blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.9 }));
+      glow.scale.setScalar(1.1);
+      glow.position.z = -0.15;
+      glow.renderOrder = 6;
+      glow.visible = false;
+      ex.add(glow);
+      this.flameGlows.push(glow);
     }
     const blobTex = makeBlobTexture();
     this.shadowBlob = new THREE.Mesh(
@@ -112,14 +129,21 @@ export class KartView {
     // boost flames
     const boosting = k.boostTime > 0;
     const flameColor = k.boostKind === 'drift3' ? '#d070ff' : k.boostKind === 'drift2' ? '#ff8a2e' : k.boostKind === 'drift1' ? '#58b8ff' : k.boostKind === 'rocket' ? '#ff4a2e' : '#ffb02e';
-    for (const f of this.flames) {
+    const big = k.boostKind === 'rocket' || k.boostKind === 'special' || k.boostKind === 'drift3';
+    this.flames.forEach((f, i) => {
       f.visible = boosting;
+      const g = this.flameGlows[i];
+      g.visible = boosting;
       if (boosting) {
-        const sc = 0.8 + Math.random() * 0.6 + (k.boostKind === 'rocket' || k.boostKind === 'special' ? 0.8 : 0);
-        f.scale.set(1, 1, sc);
-        (f.material as THREE.MeshBasicMaterial).color.set(flameColor);
+        const sc = 0.8 + Math.random() * 0.6 + (big ? 0.8 : 0);
+        const w = 1 + (big ? 0.35 : 0) + Math.random() * 0.15;
+        f.scale.set(w, w, sc);
+        (f.material as THREE.MeshBasicMaterial).color.set(flameColor).multiplyScalar(1.8);
+        const gm = g.material as THREE.SpriteMaterial;
+        gm.color.set(flameColor).multiplyScalar(1.4);
+        g.scale.setScalar((big ? 1.3 : 0.9) * (0.9 + Math.random() * 0.2));
       }
-    }
+    });
 
     // shadow blob stays on the ground
     this.shadowBlob.position.y = k.groundY - this.interpPos.y + 0.05;
@@ -135,9 +159,11 @@ export class KartView {
     if (!fx || respawning) return;
     // particles: drift sparks & smoke, boost fire, offroad dust
     const emitRate = Math.min(1, dt * 60);
+    const skids = fx.skids;
     if (k.drift.active && k.grounded) {
-      for (const rc of this.kart.rearContacts) {
+      this.kart.rearContacts.forEach((rc, wi) => {
         rc.getWorldPosition(tmp);
+        skids?.add(k.id * 2 + wi, tmp.x, k.groundY + 0.1, tmp.z);
         if (Math.random() < 0.7 * emitRate) {
           fx.smoke.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, spread: 0.6, vy: 1.2, color: '#e8e8e8', size: 0.9, life: 0.7, grow: 2.4, drag: 2 });
         }
@@ -147,18 +173,31 @@ export class KartView {
         } else if (Math.random() < 0.4) {
           fx.glow.emit({ x: tmp.x, y: tmp.y + 0.15, z: tmp.z, spread: 1.5, vy: 1.5, color: '#fff2b0', size: 0.2, life: 0.25, gravity: 10 });
         }
-      }
+      });
+    } else if (skids) {
+      skids.lift(k.id * 2);
+      skids.lift(k.id * 2 + 1);
     }
     if (boosting) {
       for (const ex of this.kart.exhausts) {
         ex.getWorldPosition(tmp);
-        fx.glow.emit({ x: tmp.x, y: tmp.y, z: tmp.z, vx: -Math.sin(this.interpYaw) * 4, vz: -Math.cos(this.interpYaw) * 4, spread: 0.8, color: flameColor, size: 0.6, life: 0.25, drag: 3, count: 2 });
+        fx.glow.emit({ x: tmp.x, y: tmp.y, z: tmp.z, vx: -Math.sin(this.interpYaw) * 4, vz: -Math.cos(this.interpYaw) * 4, spread: 0.8, color: flameColor, size: 0.45, life: 0.25, drag: 3, count: 2 });
       }
     }
-    if (k.offroad && k.grounded && Math.abs(speed) > 5) {
+    const special = k.surface === 'ice' || k.surface === 'milk' || k.surface === 'mud';
+    if ((k.offroad || special) && k.grounded && Math.abs(speed) > 5) {
+      // ground spray by surface / theme: grass bits, dirt, snow powder, milk splashes, ice glitter
+      const sc = sprayColor(fx.theme, k.surface);
       const rc = this.kart.rearContacts[Math.random() < 0.5 ? 0 : 1];
       rc.getWorldPosition(tmp);
-      fx.smoke.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, spread: 0.8, vy: 1.5, color: k.surface === 'mud' ? '#6b4a2b' : '#b59a6a', size: 0.8, life: 0.6, grow: 2, drag: 2 });
+      const back = Math.min(1, Math.abs(speed) / 25);
+      const vx = -Math.sin(this.interpYaw) * 3 * back, vz = -Math.cos(this.interpYaw) * 3 * back;
+      if (k.offroad || k.surface !== 'ice') {
+        fx.smoke.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, vx, vz, spread: 0.8, vy: 1.5 + back, color: sc.color, size: 0.8, life: 0.6, grow: 2, drag: 2 });
+      }
+      if (sc.glow && fx.quality !== 'low' && Math.random() < 0.6) {
+        fx.glow.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, vx: vx * 1.5, vz: vz * 1.5, spread: 1.2, vy: 2.5, color: sc.glow, size: 0.18, life: 0.45, gravity: 9, drag: 1 });
+      }
     }
     if (k.spinTime > 0 && Math.random() < 0.5) {
       fx.glow.emit({ x: this.interpPos.x, y: this.interpPos.y + 2.4, z: this.interpPos.z, spread: 1.2, color: '#ffe14a', size: 0.4, life: 0.4 });
@@ -171,12 +210,29 @@ export class KartView {
     this.character.dispose();
     this.shield.geometry.dispose();
     this.root.traverse((o) => {
-      if (o instanceof THREE.Mesh && o.material instanceof THREE.Material && (o === this.shadowBlob || this.flames.includes(o))) {
+      if (o instanceof THREE.Mesh && o.material instanceof THREE.Material && (o === this.shadowBlob || this.flames.includes(o) || this.flameCores.includes(o))) {
         o.geometry.dispose();
         o.material.dispose();
       }
     });
+    for (const g of this.flameGlows) g.material.dispose();
   }
+}
+
+let glowTex: THREE.Texture | null = null;
+function makeGlowTexture(): THREE.Texture {
+  if (glowTex) return glowTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  glowTex = new THREE.CanvasTexture(c);
+  return glowTex;
 }
 
 let blobTex: THREE.Texture | null = null;

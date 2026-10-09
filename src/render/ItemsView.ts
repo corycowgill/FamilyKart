@@ -15,6 +15,9 @@ export class ItemsView {
   private boxGeo: THREE.BufferGeometry;
   private qMat: THREE.MeshBasicMaterial;
   private qGeo: THREE.PlaneGeometry;
+  /** one additive glow halo per box, all in a single Points draw call */
+  private halo: THREE.Points;
+  private haloPos: Float32Array;
 
   constructor(private sim: RaceSim) {
     const qTex = questionTexture();
@@ -39,6 +42,16 @@ export class ItemsView {
       this.boxes.push(g);
       this.group.add(g);
     }
+    this.haloPos = new Float32Array(Math.max(1, sim.items.boxes.length) * 3);
+    const hg = new THREE.BufferGeometry();
+    hg.setAttribute('position', new THREE.BufferAttribute(this.haloPos, 3).setUsage(THREE.DynamicDrawUsage));
+    const haloTex = haloTexture();
+    const haloMat = new THREE.PointsMaterial({ map: haloTex, size: 3.6, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: '#ffcc33', opacity: 0.55 });
+    this.halo = new THREE.Points(hg, haloMat);
+    this.halo.frustumCulled = false;
+    this.halo.renderOrder = 2;
+    this.group.add(this.halo);
+    this.disposables.push(hg, haloMat, haloTex);
   }
 
   update(dt: number, time: number, alpha: number, fx: Effects | null): void {
@@ -57,6 +70,17 @@ export class ItemsView {
     });
     const hue = (time * 0.15) % 1;
     this.boxMat.emissive.setHSL(hue, 0.9, 0.5);
+    // shimmering halo, slightly over-bright so it catches the bloom
+    this.boxes.forEach((g, i) => {
+      const o = i * 3;
+      this.haloPos[o] = g.position.x;
+      this.haloPos[o + 1] = g.visible && g.scale.x > 0.5 ? g.position.y : -1e4;
+      this.haloPos[o + 2] = g.position.z;
+    });
+    (this.halo.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    const hm = this.halo.material as THREE.PointsMaterial;
+    hm.color.setHSL(hue, 0.85, 0.62).multiplyScalar(1.3);
+    hm.size = 3.4 + Math.sin(time * 5) * 0.4;
 
     // projectiles
     const seenP = new Set<number>();
@@ -143,6 +167,24 @@ function disposeObject(o: THREE.Object3D): void {
       mats.forEach((m) => m.dispose());
     }
   });
+}
+
+function haloTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const grd = g.createRadialGradient(32, 32, 6, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(255,255,255,0.9)');
+  grd.addColorStop(0.4, 'rgba(255,255,255,0.35)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  // four-point sparkle
+  g.globalCompositeOperation = 'lighter';
+  g.fillStyle = 'rgba(255,255,255,0.8)';
+  g.fillRect(31, 2, 2, 60);
+  g.fillRect(2, 31, 60, 2);
+  return new THREE.CanvasTexture(c);
 }
 
 function questionTexture(): THREE.Texture {

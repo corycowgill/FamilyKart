@@ -82,7 +82,11 @@ export const NEIGHBORHOOD: TrackDef = {
     { kind: 'sprinkler', t: f(0, -250), sweep: 4, period: 4, radius: 2.2 },
   ],
   landmarks: [
-    { kind: 'church', x: -70, z: 40, rot: Math.PI / 2 },
+    { kind: 'church', x: -112, z: 70, rot: Math.PI / 2 },
+    { kind: 'ltrain', x: -46, z: -110, rot: Math.PI / 2 },
+    { kind: 'ballpark', x: -152, z: -150, rot: Math.PI / 2 },
+    { kind: 'skyline', x: 140, z: 760 },
+    { kind: 'tavern', x: 120, z: 168, rot: Math.PI },
     { kind: 'park', x: 175, z: -250 },
     { kind: 'watertower', x: 330, z: 120 },
     { kind: 'cornerStore', x: 44, z: 178, rot: Math.PI },
@@ -92,7 +96,7 @@ export const NEIGHBORHOOD: TrackDef = {
     { kind: 'hydrant', x: 22, z: -100 },
   ],
   lighting: {
-    skyTop: '#4f9be8', skyBottom: '#ffe7c4', fog: '#e8dcc8', fogNear: 220, fogFar: 1100,
+    skyTop: '#4f9be8', skyBottom: '#ffe7c4', fog: '#e8dcc8', fogNear: 260, fogFar: 1500,
     sun: '#ffd9a0', sunIntensity: 2.4, ambient: '#c7d9ff', ground: '#6ab84f',
   },
   music: { tempo: 132, root: 62, scale: 'mixolydian', style: 'surf' },
