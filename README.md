@@ -1,7 +1,7 @@
 # 🏁 Family Kart Racing
 
 A colorful, chaotic, family-themed 3D arcade kart racer that runs in the browser.
-Dad, Mom, Bro 1, Bro 2, Lupin (the fluffy Tibetan Terrier) and Grandma race each other through Chicago,
+Dad, Mom, Bro 1, Bro 2, Lupin (the fluffy Tibetan Terrier) and Grandma race each other through Chicago (two tracks, including the Sweet Home Chicago grand tour),
 their neighborhood, a giant kitchen, Lupin's dog park and a Chicago snowstorm.
 
 Built with **TypeScript + Three.js + Vite**. Everything (characters, karts, tracks, music, sound effects) is
@@ -41,7 +41,7 @@ Steering assist for younger racers can be turned on in Settings or on the track-
 
 ### Modes
 - **Quick Race**: pick a racer, a track and a difficulty, then race the other five family members over 3 laps.
-- **Grand Prix**: two four-race cups with points (15/12/10/8/6/4) and a podium ceremony.
+- **Grand Prix**: three four-race cups (Windy City, Sweet Home Chicago, Frosty Family) with points (15/12/10/8/6/4) and a podium ceremony.
 - **Time Trial**: race solo against the clock and your saved ghost.
 - **2-Player Versus**: split-screen racing on one computer.
 - **Garage**: browse the karts and your records.
