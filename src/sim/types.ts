@@ -168,6 +168,7 @@ export interface KartState {
   turboDriftTime: number;
   offroad: boolean;
   surface: SurfaceType;
+  groundY: number;
   // track tracking
   pathId: number;
   sampleHint: number;

@@ -1,0 +1,22 @@
+# Render.com Blueprint: static site, no backend required.
+services:
+  - type: web
+    name: cowgill-kart-racing
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    pullRequestPreviewsEnabled: false
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
+      - path: /*.jpg
+        name: Cache-Control
+        value: public, max-age=86400
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

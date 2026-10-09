@@ -10,7 +10,7 @@ export function createKart(id: number, character: CharacterId, tuning: KartTunin
     grounded: true, airTime: 0, forwardSpeed: 0, steerVisual: 0, suspension: 0, suspensionVel: 0,
     drift: { active: false, dir: 0, charge: 0, tier: 0, hopPending: false },
     boostTime: 0, boostPower: 0, boostKind: 'none', spinTime: 0, spinDir: 1, invulnTime: 0, shieldTime: 0, rocketTime: 0, turboDriftTime: 0,
-    offroad: false, surface: 'road', pathId: 0, sampleHint: 0, mainS, lateral: 0,
+    offroad: false, surface: 'road', groundY: pos.y, pathId: 0, sampleHint: 0, mainS, lateral: 0,
     raceDistance: mainS, lapsCompleted: 0, nextCheckpoint: 0, lastLapTime: 0, bestLapTime: Infinity, lapStartTime: 0, lapTimes: [],
     finished: false, finishTime: 0, finishPlace: 0, place: id + 1,
     item: null, itemRoulette: 0, specialCooldown: 0, specialMax: 20,
@@ -214,6 +214,7 @@ export function stepKart(k: KartState, input: KartInput, dt: number, track: Trac
   }
 
   const ground = q.groundY;
+  k.groundY = q.inGap ? -6 : ground;
   if (k.pos.y <= ground) {
     if (!k.grounded) {
       const impact = -k.vy;

@@ -1,5 +1,6 @@
 import type { TrackDef, TrackPoint } from '../../sim/types';
 import { fractionNear } from './helpers';
+import { shortcutExitFraction } from './layout';
 
 // Lake Michigan lies east (+x). Downtown skyline to the west. Start/finish on the lakefront heading north.
 const points: TrackPoint[] = [
@@ -31,6 +32,13 @@ const points: TrackPoint[] = [
 ];
 
 const f = (x: number, z: number) => fractionNear(points, x, z);
+const alleyPoints: TrackPoint[] = [
+  [-96, 153],
+  [-110, 170],
+  [-128, 200],
+  [-150, 232],
+  [-170, 252],
+];
 const gapStart = f(-340, 160);
 const gapEnd = f(-339, 146);
 
@@ -47,15 +55,9 @@ export const CHICAGO: TrackDef = {
   shortcuts: [
     {
       id: 'alley',
-      points: [
-        [-96, 153],
-        [-110, 170],
-        [-128, 200],
-        [-150, 232],
-        [-170, 252],
-      ],
+      points: alleyPoints,
       width: 8,
-      from: f(-96, 152),
+      from: shortcutExitFraction(points, alleyPoints, 16, 18),
       to: f(-172, 252),
       surface: 'road',
       aiAppeal: 0.6,
@@ -78,7 +80,8 @@ export const CHICAGO: TrackDef = {
     { kind: 'fountain', x: -250, z: 80 },
     { kind: 'ltrain', x: -172, z: 230, rot: Math.PI / 2 },
     { kind: 'bridge', x: -340, z: 153 },
-    { kind: 'river', x: -340, z: 153, rot: Math.PI / 2 },
+    { kind: 'river', x: -300, z: 153, rot: 0, scale: 100 },
+    { kind: 'shore', x: 80, z: 0 },
     { kind: 'skyline', x: -260, z: 200 },
     { kind: 'lake', x: 300, z: 0 },
   ],

@@ -3,8 +3,8 @@ import type { KartStats, KartTuning } from '../types';
 /** Convert 1-5 star stats into arcade physics tuning. Differences are intentionally modest. */
 export function tuningFromStats(s: KartStats): KartTuning {
   return {
-    maxSpeed: 26 + s.speed * 1.0, // 27..31 m/s
-    acceleration: 9 + s.acceleration * 1.8,
+    maxSpeed: 28.1 + s.speed * 0.4, // 28.5..30.1 m/s (was 26 + 1.0/star: speed stat dominated AI results)
+    acceleration: 12.6 + s.acceleration * 0.9, // 13.5..17.1 (was 9 + 1.8/star; same value at 4 stars)
     reverseSpeed: 9,
     brake: 30,
     steer: 1.55 + s.handling * 0.12,
