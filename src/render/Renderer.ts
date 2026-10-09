@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -29,6 +30,17 @@ export class Renderer {
     window.addEventListener('resize', () => this.resize());
     this.setQuality('high');
     this.resize();
+  }
+
+  private env: THREE.Texture | null = null;
+  /** Shared prefiltered environment map so clear-coat paint and chrome have something to reflect. */
+  envMap(): THREE.Texture {
+    if (!this.env) {
+      const pm = new THREE.PMREMGenerator(this.gl);
+      this.env = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+      pm.dispose();
+    }
+    return this.env;
   }
 
   onResize(cb: () => void): void {

@@ -35,6 +35,9 @@ export const AI_DIFFICULTY: Record<'easy' | 'normal' | 'hard', AIDifficultyConfi
   },
 };
 
+/** Telemetry: why AI drifts ended (read by the simulation harness). */
+export const AI_DRIFT_RELEASES: Record<string, number> = {};
+
 type AIState = 'race' | 'recover' | 'mistake';
 
 /** Seconds without any race progress before an AI racer is respawned on the track. */
@@ -204,7 +207,8 @@ export class AIDriver {
       const racing = track.racingLineAt(s);
       const smp = track.sampleAt(0, s);
       this.updateLane(dt, smp.halfWidth);
-      const lat = clamp(racing + this.laneOffset + this.laneBias * smp.halfWidth, -smp.halfWidth * 0.8, smp.halfWidth * 0.8);
+      const driftAim = k.drift.active ? -k.drift.dir * smp.halfWidth * 0.25 - racing * 0.8 : 0; // drifting already carves tight: aim wider
+      const lat = clamp(racing + driftAim + this.laneOffset + this.laneBias * smp.halfWidth, -smp.halfWidth * 0.8, smp.halfWidth * 0.8);
       tx = smp.x + smp.nx * lat;
       tz = smp.z + smp.nz * lat;
     }
@@ -235,19 +239,42 @@ export class AIDriver {
     if (Math.abs(err) > 1.4 && speed > 8) throttle = Math.min(throttle, 0.1);
 
     // --- drifting through long corners
-    const driftWanted = this.cfg.driftSkill * this.personality.drift > 0.25 && maxCurv > 0.018 && speed > 16 && !onShortcut && k.surface !== 'ice';
+    // Look at the whole upcoming corner: total heading change and its direction.
+    let turnAhead = 0;
+    let turnSoon = 0;
+    if (!onShortcut) {
+      for (let d = 2; d < 70; d += 4) {
+        const c = track.sampleAt(0, k.mainS + d).curvature * 4;
+        turnAhead += c;
+        if (d < 30) turnSoon += c;
+      }
+    }
+    const canDrift = this.cfg.driftSkill * this.personality.drift > 0.25 && !onShortcut && k.surface !== 'ice' && k.surface !== 'milk';
+    const targetTier = this.cfg.driftSkill > 0.8 ? 3 : this.cfg.driftSkill > 0.4 ? 2 : 1;
     if (k.drift.active) {
       this.driftTime += dt;
-      const sameDir = Math.sign(-err) === k.drift.dir || Math.abs(err) < 0.05;
-      const targetTier = this.cfg.driftSkill > 0.8 ? 3 : this.cfg.driftSkill > 0.4 ? 2 : 1;
-      const keep = sameDir && maxCurv > 0.008 && !(k.drift.tier >= targetTier && maxCurv < 0.012) && this.driftTime < 4;
+      const dir = k.drift.dir; // + = right (curvature +)
+      const remaining = turnSoon * dir; // >0 while the corner continues in our drift direction
+      const outsideLat = -k.lateral * dir; // + = drifting toward the outside wall
+      const hw = track.sampleAt(0, k.mainS).halfWidth;
+      // release before scraping either edge, or when the line now points out of the corner
+      const nearWall = k.pathId === 0 && (outsideLat > hw * 0.95 || -outsideLat > hw * 0.92);
+      const pointingOut = Math.sign(-err) === -dir && Math.abs(err) > 0.55;
+      const tierDone = k.drift.tier >= targetTier;
+      const keep = !nearWall && !pointingOut && this.driftTime < 5 && (remaining > 0.12 || (!tierDone && remaining > -0.05 && Math.abs(err) < 0.6));
+      if (!keep && this.holdDrift) {
+        const why = nearWall ? (outsideLat > 0 ? 'edgeOutside' : 'edgeInside') : pointingOut ? 'pointingOut' : this.driftTime >= 5 ? 'timeout' : tierDone ? 'cornerDone' : 'cornerEnded';
+        AI_DRIFT_RELEASES[why] = (AI_DRIFT_RELEASES[why] ?? 0) + 1;
+      }
       this.holdDrift = keep;
-      // in a drift, steering modulates tightness
-      steer = clamp(-err * 3, -1, 1);
+      // steering modulates drift tightness: into the drift = tighter, counter-steer = wider
+      steer = clamp(-err * 3.2, -1, 1);
     } else {
       this.driftTime = 0;
-      if (driftWanted && Math.abs(steer) > 0.45 && k.grounded) this.holdDrift = !this.holdDrift ? true : this.holdDrift;
-      else if (!k.drift.hopPending) this.holdDrift = false;
+      const bigCorner = Math.abs(turnAhead) > 0.75 && Math.abs(turnSoon) > 0.25;
+      if (canDrift && bigCorner && speed > 15 && k.grounded && Math.sign(turnSoon) === Math.sign(steer) && Math.abs(steer) > 0.25) {
+        this.holdDrift = true;
+      } else if (!k.drift.hopPending) this.holdDrift = false;
     }
     if (this.holdDrift && maxCurv > 0.018) throttle = Math.max(throttle, 0.6);
 

@@ -16,6 +16,8 @@ export class Podium {
   private time = 0;
 
   constructor(private renderer: Renderer, top: CharacterId[], others: CharacterId[] = []) {
+    this.scene.environment = renderer.envMap();
+    this.scene.environmentIntensity = 0.45;
     this.scene.background = new THREE.Color('#2a63d9');
     this.scene.fog = new THREE.Fog('#2a63d9', 40, 120);
     this.scene.add(new THREE.HemisphereLight('#dfeaff', '#4a3a70', 1.7));

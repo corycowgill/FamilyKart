@@ -203,7 +203,7 @@ function buildWheel(ws: WheelSpec, st: KartStyle, side: number): THREE.Group {
     const a = (i / 5) * Math.PI * 2;
     const sp = mesh(spokeGeo, spokeMat);
     sp.position.set(ws.w * 0.41, Math.cos(a) * rr * 0.5, Math.sin(a) * rr * 0.5);
-    sp.rotation.x = -a;
+    sp.rotation.x = a;
     inner.add(sp);
   }
   const cap = mesh(cylinderGeo(rr * 0.28, rr * 0.34, 0.07, 14), rimMat);
@@ -463,17 +463,10 @@ export function buildKart(def: CharacterDef): KartRig {
       const wantFender = st.fenders === 'all' || (st.fenders === 'front' && front);
       if (wantFender) {
         // cartoon bubble mudguard hugging the top of the tyre
-        const f = mesh(sphereGeo(16, 10), paint(st.body));
+        const f = mesh(sphereGeo(14, 9), paint(st.body));
         f.scale.set(ws.w / 2 + 0.07, ws.r * 0.55, ws.r + 0.12);
         f.position.set(0, ws.r * 0.62, 0);
         holder.add(f);
-        if (id === 'grandma') {
-          const trim = mesh(cylinderGeo(0.012, 0.012, 1, 6), chrome(), false);
-          trim.scale.y = (ws.r + 0.1) * 2;
-          trim.rotation.x = Math.PI / 2;
-          trim.position.set(s * (ws.w / 2 + 0.07), ws.r * 0.62, 0);
-          holder.add(trim);
-        }
       }
     }
   }
@@ -646,7 +639,7 @@ function buildSpoiler(body: THREE.Group, st: KartStyle, def: CharacterDef, R: nu
       body.add(daisy);
       const petalMat = plastic('#ffffff', 0.6);
       for (let i = 0; i < 10; i++) {
-        const p = mesh(sphereGeo(8, 6), petalMat, false);
+        const p = mesh(sphereGeo(6, 4), petalMat, false);
         const a = (i / 10) * Math.PI * 2;
         p.scale.set(0.022, 0.06, 0.012);
         p.position.set(Math.sin(a) * 0.06, Math.cos(a) * 0.06, 0);

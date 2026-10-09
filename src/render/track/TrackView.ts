@@ -77,6 +77,8 @@ interface WallStrip {
 
 interface Style {
   road: RoadTexOpts;
+  /** Road texture for shortcut corridors (defaults to the main road). */
+  scRoad?: RoadTexOpts;
   roadTile: number;
   roadRough: number;
   shoulder: () => THREE.Texture;
@@ -216,6 +218,7 @@ const STYLES: Record<TrackTheme, Style> = {
   },
   neighborhood: {
     road: { base: '#4e5157', speck: ['#3a3c40', '#62656b', '#6e6a62'], edge: null, center: '#f2c94c', patches: ['#3a3c41', '#2f3135', '#5f6168'] },
+    scRoad: { base: '#b3afa6', speck: ['#9a968e', '#c9c5bc', '#8a867e'], edge: null, center: null, patches: ['#a29e95', '#c2beb5'], lanes: 0 },
     roadTile: 16, roadRough: 0.9,
     shoulder: () =>
       canvasTexture(128, 128, (g, w, h, rng) => {
@@ -305,6 +308,7 @@ const STYLES: Record<TrackTheme, Style> = {
   },
   dogpark: {
     road: { base: '#c08f5a', speck: ['#9c6e40', '#d6a873', '#8a5e34', '#e0bb8a'], edge: null, center: null, patches: ['#a8764a', '#d2a06a'], style: 'dirt', edgeInset: 0.04 },
+    scRoad: { base: '#6e4826', speck: ['#4f3218', '#8a5e34', '#3e2610'], edge: null, center: null, patches: ['#5a3a1e', '#7d5530'], style: 'dirt', edgeInset: 0.06 },
     roadTile: 14, roadRough: 1,
     shoulder: shoulderStripes('#7cc35a', '#6db54d'), shoulderTile: 8, shoulderRough: 1,
     curb: ['#f28c28', '#fff4e0'],
@@ -319,6 +323,7 @@ const STYLES: Record<TrackTheme, Style> = {
   },
   snow: {
     road: { base: '#c3ccd8', speck: ['#a9b4c4', '#e2e8f0', '#9aa6b6'], edge: null, center: null, patches: ['#b3bdcb', '#dfe6ef'], style: 'snow' },
+    scRoad: { base: '#cfe8f7', speck: ['#ffffff', '#b5d6ec', '#e6f4fc'], edge: null, center: null, patches: ['#bfe0f3', '#eaf6fd'] },
     roadTile: 14, roadRough: 0.75,
     shoulder: shoulderStripes('#f4f8fd', '#e8eff8'), shoulderTile: 10, shoulderRough: 0.9,
     curb: ['#e3262b', '#ffffff'],
@@ -427,6 +432,10 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
   const roadMat = own(new THREE.MeshStandardMaterial({ map: roadTex, roughness: style.roadRough, metalness: 0 }));
   const shoulderMat = own(new THREE.MeshStandardMaterial({ map: tex(style.shoulder()), roughness: style.shoulderRough }));
   const roadGB = new GB();
+  const scRoadGB = new GB();
+  const scRoadMat = style.scRoad
+    ? own(new THREE.MeshStandardMaterial({ map: tex(roadTexture(style.scRoad, 19)), roughness: def.theme === 'snow' ? 0.15 : style.roadRough, metalness: def.theme === 'snow' ? 0.2 : 0 }))
+    : roadMat;
   const shoulderGB = new GB();
 
   // indices of a path's sample sequence including the wrap for closed paths
@@ -470,7 +479,7 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
       return !smp.gap;
     };
     // a segment exists if both ends are not gap; we approximate by dropping gap samples
-    ribbon(roadGB, p, (s) => -s.halfWidth, (s) => s.halfWidth, isMain ? 0.05 : 0.025, tile, notGap);
+    ribbon(isMain ? roadGB : scRoadGB, p, (s) => -s.halfWidth, (s) => s.halfWidth, isMain ? 0.05 : 0.025, tile, notGap);
     const stile = style.shoulderTile;
     const leftStart = shoulderGB.uv.length;
     ribbon(shoulderGB, p, (s) => -wallDistOf(s) - 0.3, (s) => -s.halfWidth + 0.01, isMain ? 0.0 : -0.02, stile, notGap);
@@ -481,6 +490,7 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
     for (let j = leftStart; j < before; j += 2) shoulderGB.uv[j] = 1 - shoulderGB.uv[j];
   }
   addMesh(roadGB, roadMat, { name: 'road' });
+  addMesh(scRoadGB, scRoadMat, { name: 'shortcutRoad' });
   addMesh(shoulderGB, shoulderMat, { name: 'shoulder' });
 
   /* ---------- curbs on corners */

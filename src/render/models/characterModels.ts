@@ -167,7 +167,7 @@ function spherePt(r: number, dphi: number, theta: number): THREE.Vector3 {
 
 function facePatchGeo(): THREE.BufferGeometry {
   return cachedGeo('facepatch', () =>
-    new THREE.SphereGeometry(1, 30, 26, Math.PI / 2 - FACE.phiSpan / 2, FACE.phiSpan, FACE.theta0, FACE.thetaSpan),
+    new THREE.SphereGeometry(1, 26, 22, Math.PI / 2 - FACE.phiSpan / 2, FACE.phiSpan, FACE.theta0, FACE.thetaSpan),
   );
 }
 
@@ -351,7 +351,7 @@ function ringGeo(style: 'rect' | 'soft' | 'round', hw: number, hh: number): THRE
       rrect(inner, hw, hh, rr, true);
     }
     outer.holes.push(inner);
-    const g = new THREE.ExtrudeGeometry(outer, { depth: 0.012, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.003, bevelSegments: 1, curveSegments: style === 'round' ? 7 : 3 });
+    const g = new THREE.ExtrudeGeometry(outer, { depth: 0.012, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.003, bevelSegments: 1, curveSegments: style === 'round' ? 12 : 3 });
     g.translate(0, 0, -0.006);
     return g;
   });
@@ -483,9 +483,9 @@ function buildHair(head: THREE.Group, sp: HumanSpec, rig: Partial<Rig>): void {
   };
   const rnd = seeded(sp.hair.length * 97 + 13);
   /** lock rooted on the scalp at (dphi, theta), pointing along its normal blended with gravity by `droop` */
-  const lock = (dphi: number, theta: number, len: number, wid: number, droop: number, c: string, push = 1.0): Strand => {
+  const lock = (dphi: number, theta: number, len: number, wid: number, droop: number, c: string, push = 1.0, flow?: THREE.Vector3): Strand => {
     const n = spherePt(1, dphi, theta);
-    return { p: n.clone().multiplyScalar(r * push), n, len: r * len, wid: r * wid, c, droop };
+    return { p: n.clone().multiplyScalar(r * push), n, len: r * len, wid: r * wid, c, droop, flow };
   };
   switch (sp.hair) {
     case 'dad': {
@@ -502,8 +502,8 @@ function buildHair(head: THREE.Group, sp: HumanSpec, rig: Partial<Rig>): void {
       cap(1.62, 0.66, 1.05);
       // swept side-part volume
       const sw = mesh(sphereGeo(20, 14), hairMat);
-      sw.position.copy(spherePt(r * 0.86, -0.25, 0.7));
-      sw.scale.set(r * 0.78, r * 0.3, r * 0.55);
+      sw.position.copy(spherePt(r * 0.84, -0.25, 0.72));
+      sw.scale.set(r * 0.66, r * 0.24, r * 0.48);
       sw.rotation.set(-0.3, -0.2, 0.25);
       head.add(sw);
       // ponytail on a swinging pivot
@@ -532,28 +532,29 @@ function buildHair(head: THREE.Group, sp: HumanSpec, rig: Partial<Rig>): void {
     case 'brennan': {
       cap(1.45, 0.5, 1.05);
       const strands: Strand[] = [];
-      // forward-swept fringe
-      for (let i = -4; i <= 4; i++) strands.push(lock(i * 0.14, 0.7 + Math.abs(i) * 0.03, 0.36, 0.12, 0.45, i % 2 ? sp.hairColor2 : sp.hairColor, 0.97));
-      // short textured top
-      for (let i = 0; i < 18; i++) {
+      const up = new THREE.Vector3(0, 1, 0.35);
+      // short spiky front flicked up, textured top combed back
+      for (let i = -4; i <= 4; i++) strands.push(lock(i * 0.15, 0.7 + Math.abs(i) * 0.04, 0.4, 0.16, 0.75, i % 2 ? sp.hairColor2 : sp.hairColor, 0.94, up));
+      for (let i = 0; i < 16; i++) {
         const dphi = (rnd() - 0.5) * 4.4;
-        strands.push(lock(dphi, 0.12 + rnd() * 0.62, 0.3, 0.12, -0.1, rnd() > 0.5 ? sp.hairColor2 : sp.hairColor, 0.96));
+        strands.push(lock(dphi, 0.15 + rnd() * 0.65, 0.36, 0.17, 0.75, rnd() > 0.5 ? sp.hairColor2 : sp.hairColor, 0.94, new THREE.Vector3(0, 0.2, -1)));
       }
       head.add(shaggy(strands, rnd, 8));
       break;
     }
     case 'parker': {
       cap(1.5, 0.45, 1.05);
-      // messy spiky blond tufts sticking out in all directions
+      // messy, wind-swept blond hair
       const strands: Strand[] = [];
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 22; i++) {
         const dphi = (rnd() - 0.5) * Math.PI * 2;
-        const theta = 0.1 + rnd() * 0.95;
-        if (Math.cos(dphi) > 0.5 && theta > 0.75) continue;
-        strands.push(lock(dphi, theta, 0.36 + rnd() * 0.14, 0.12, -0.3 + rnd() * 0.7, rnd() > 0.45 ? sp.hairColor2 : sp.hairColor, 0.96));
+        const theta = 0.12 + rnd() * 0.9;
+        if (Math.cos(dphi) > 0.5 && theta > 0.7) continue;
+        const flow = new THREE.Vector3(0.35 + (rnd() - 0.5) * 0.8, 0.45 + rnd() * 0.5, -1);
+        strands.push(lock(dphi, theta, 0.46 + rnd() * 0.16, 0.19, 0.7, rnd() > 0.45 ? sp.hairColor2 : sp.hairColor, 0.93, flow));
       }
-      // fringe flopping onto the forehead
-      for (let i = -4; i <= 4; i++) strands.push(lock(i * 0.15, 0.76, 0.36, 0.12, 0.65, i % 2 ? sp.hairColor2 : sp.hairColor, 0.96));
+      // big floppy fringe swept across the forehead
+      for (let i = -3; i <= 3; i++) strands.push(lock(i * 0.2, 0.68, 0.5, 0.2, 0.8, i % 2 ? sp.hairColor2 : sp.hairColor, 0.93, new THREE.Vector3(0.8, 0.15, 0.6)));
       head.add(shaggy(strands, rnd, 8));
       break;
     }
@@ -572,7 +573,7 @@ function buildHair(head: THREE.Group, sp: HumanSpec, rig: Partial<Rig>): void {
         const sz = r * (0.2 + rnd() * 0.07);
         pts.push({ p, s: new THREE.Vector3(sz, sz, sz), c: rnd() > 0.5 ? sp.hairColor : rnd() > 0.5 ? sp.hairColor2 : '#eeeef2' });
       }
-      head.add(instancedPuffs(pts, [8, 6]));
+      head.add(instancedPuffs(pts, [7, 5]));
       break;
     }
   }
@@ -667,7 +668,7 @@ function buildHuman(id: Exclude<CharacterId, 'lupin'>): Rig {
   const headShape = new THREE.Group();
   headShape.scale.set(...sp.headScale);
   head.add(headShape);
-  const skull = mesh(sphereGeo(28, 20), skin);
+  const skull = mesh(sphereGeo(24, 18), skin);
   skull.scale.setScalar(sp.headR);
   headShape.add(skull);
   const face = newFaceMat(id, sp.face);
@@ -737,7 +738,8 @@ interface Strand {
   len: number;
   wid: number;
   c: string;
-  droop?: number; // 0..1 how much it hangs with gravity
+  droop?: number; // 0..1 how much it hangs with gravity (or follows `flow`)
+  flow?: THREE.Vector3; // combing direction (defaults to gravity)
 }
 
 /** Tapered teardrop "lock" of hair hanging along -Y from the origin, darker towards the tip. */
@@ -768,7 +770,8 @@ function shaggy(strands: Strand[], rnd: () => number, seg = 5): THREE.InstancedM
   const col = new THREE.Color();
   strands.forEach((st, i) => {
     const n = st.n.clone().normalize();
-    const d = down.clone().addScaledVector(n, -n.dot(down));
+    const g = st.flow ? st.flow.clone().normalize() : down;
+    const d = g.clone().addScaledVector(n, -n.dot(g));
     if (d.lengthSq() < 0.09) {
       const out = new THREE.Vector3(st.p.x, 0, st.p.z);
       if (out.lengthSq() < 1e-4) out.set(0, 0, -1);
@@ -808,7 +811,7 @@ function buildLupin(): Rig {
   const pelvis = new THREE.Group();
   pelvis.position.y = 0.02;
   root.add(pelvis);
-  const hip = mesh(sphereGeo(14, 10), cream);
+  const hip = mesh(sphereGeo(10, 8), cream);
   hip.scale.set(0.21, 0.15, 0.22);
   hip.position.set(0, 0.08, -0.02);
   pelvis.add(hip);
@@ -837,12 +840,12 @@ function buildLupin(): Rig {
   const spine = new THREE.Group();
   spine.position.y = 0.04;
   pelvis.add(spine);
-  const chestCore = mesh(sphereGeo(16, 12), cream);
+  const chestCore = mesh(sphereGeo(12, 8), cream);
   chestCore.scale.set(0.17, 0.23, 0.15);
   chestCore.position.set(0, 0.2, 0.0);
   spine.add(chestCore);
   const bodyStrands: Strand[] = [];
-  const NB = 56;
+  const NB = 46;
   for (let i = 0; i < NB; i++) {
     const [th, ph] = fib(i, NB * 1.3);
     const n = new THREE.Vector3(Math.sin(th) * Math.sin(ph), Math.cos(th), Math.sin(th) * Math.cos(ph));
@@ -888,7 +891,7 @@ function buildLupin(): Rig {
   const headShape = new THREE.Group();
   head.add(headShape);
   const HR = 0.21;
-  const skull = mesh(sphereGeo(22, 16), cream);
+  const skull = mesh(sphereGeo(16, 12), cream);
   skull.scale.setScalar(HR);
   headShape.add(skull);
   const face = newFaceMat('lupin', LUPIN_FACE);
@@ -919,7 +922,7 @@ function buildLupin(): Rig {
 
   // head fur: shaggy strands everywhere except the eye/muzzle window
   const headStrands: Strand[] = [];
-  const NH = 112;
+  const NH = 92;
   for (let i = 0; i < NH; i++) {
     const [th, ph] = fib(i, NH);
     const dphi = Math.atan2(Math.sin(ph), Math.cos(ph));
@@ -1164,10 +1167,10 @@ function animate(rig: Rig, st: AnimState, dt: number, s: CharacterAnimState): vo
         const p = clamp(age / 0.6, 0, 1);
         const wind = smoothstep(0, 0.3, p) * (1 - smoothstep(0.35, 0.55, p));
         const thr = smoothstep(0.35, 0.55, p);
-        _v.set(sh.x - 0.08, sh.y + 0.4, sh.z - 0.1).lerp(_v.clone().set(sh.x - 0.05, sh.y + 0.28, sh.z + 0.42), thr);
+        _v.set(sh.x - 0.14, sh.y + 0.55, sh.z - 0.16).lerp(_v.clone().set(sh.x - 0.04, sh.y + 0.3, sh.z + 0.48), thr);
         tgt.lerp(_v, clamp(w.item * Math.max(wind, thr * (1 - smoothstep(0.75, 1, p) * 0.6)), 0, 1));
       }
-      if (w.overtake > 0.01) lerpTo(-0.06, 0.34 + Math.sin(age * 18) * 0.09, 0.14, w.overtake);
+      if (w.overtake > 0.01) lerpTo(-0.08, 0.42 + Math.sin(age * 18) * 0.1, 0.12, w.overtake);
     }
     targets.push(tgt);
   }

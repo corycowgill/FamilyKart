@@ -130,7 +130,7 @@ export function stepKart(k: KartState, input: KartInput, dt: number, track: Trac
   let yawRate: number;
   if (d.active) {
     const k01 = (steer * d.dir + 1) / 2; // 0 = counter-steer, 1 = into drift
-    yawRate = -d.dir * t.driftSteer * (0.45 + 0.75 * k01) * clamp(fs / 10, 0.4, 1);
+    yawRate = -d.dir * t.driftSteer * (0.3 + 1.05 * k01) * clamp(fs / 10, 0.4, 1);
   } else {
     yawRate = -steer * t.steer * speedFactor * sign(fs || 1);
     if (!k.grounded) yawRate *= 0.6;
@@ -154,7 +154,7 @@ export function stepKart(k: KartState, input: KartInput, dt: number, track: Trac
     vx *= decay;
     vz *= decay;
   } else if (k.grounded) {
-    const a = dyaw * (d.active ? 0.6 : t.traction) * Math.min(1, grip * 1.6);
+    const a = dyaw * (d.active ? 0.8 : t.traction) * Math.min(1, grip * 1.6);
     const ca = Math.cos(a), sa = Math.sin(a);
     const rx = vx * ca + vz * sa;
     const rz = vz * ca - vx * sa;

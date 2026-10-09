@@ -84,6 +84,8 @@ export class RaceSession {
     const q = this.renderer.quality;
     onProgress(0.1, 'Paving the track…');
     this.env = new Environment(this.scene, this.opts.track.lighting, q);
+    this.scene.environment = this.renderer.envMap();
+    this.scene.environmentIntensity = 0.35;
     this.trackView = buildTrackView(this.track, q);
     this.scene.add(this.trackView.group);
     await tick();

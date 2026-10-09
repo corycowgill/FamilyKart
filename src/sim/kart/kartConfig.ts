@@ -11,7 +11,7 @@ export function tuningFromStats(s: KartStats): KartTuning {
     driftSteer: 1.5 + s.handling * 0.1,
     traction: 0.86 + s.handling * 0.02,
     lateralGrip: 9 + s.handling * 0.8,
-    driftGrip: 2.6,
+    driftGrip: 4.2,
     suspension: 18,
     mass: 0.8 + s.weight * 0.2,
     collisionImpulse: 6,

@@ -26,6 +26,8 @@ export class Showroom {
   private handlers: Array<[string, EventListener]> = [];
 
   constructor(private renderer: Renderer) {
+    this.scene.environment = renderer.envMap();
+    this.scene.environmentIntensity = 0.5;
     this.scene.background = new THREE.Color('#3a6fe0');
     this.scene.fog = new THREE.Fog('#3a6fe0', 30, 90);
     const sky = new THREE.Mesh(new THREE.SphereGeometry(80, 24, 12), new THREE.ShaderMaterial({

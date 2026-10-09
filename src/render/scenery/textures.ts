@@ -69,7 +69,7 @@ export function roadTexture(o: RoadTexOpts, seed = 7): THREE.CanvasTexture {
     const inset = (o.edgeInset ?? 0.035) * w;
     if (o.style === 'placemat') {
       // woven placemat strip
-      g.globalAlpha = 0.18;
+      g.globalAlpha = 0.07;
       g.fillStyle = '#000';
       for (let y = 0; y < h; y += 8) g.fillRect(0, y, w, 2);
       for (let x = 0; x < w; x += 8) g.fillRect(x, 0, 2, h);
@@ -283,7 +283,15 @@ export function textTexture(text: string, opts: { w?: number; h?: number; bg?: s
       g.lineWidth = h * 0.08;
       g.strokeRect(h * 0.06, h * 0.06, w - h * 0.12, h - h * 0.12);
     }
-    g.font = opts.font ?? `900 ${Math.floor(h * 0.62)}px "Arial Black", Impact, sans-serif`;
+    let size = Math.floor(h * 0.62);
+    g.font = opts.font ?? `900 ${size}px "Arial Black", Impact, sans-serif`;
+    if (!opts.font) {
+      // shrink to fit inside the border
+      while (size > 8 && g.measureText(text).width > w * 0.9) {
+        size -= 2;
+        g.font = `900 ${size}px "Arial Black", Impact, sans-serif`;
+      }
+    }
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     if (opts.stroke) {

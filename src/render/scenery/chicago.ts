@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { SceneryContext, SceneryHandle } from './types';
-import { Batch, M, PROPS, addClouds, boxUV, ctxBits, flagGeometry, flagMaterial, mergeColored, setInstance, unitBox, vcMat, windowedMaterial } from './common';
+import { Batch, M, PROPS, addClouds, boxUV, ctxBits, elevatedTrain, flagGeometry, flagMaterial, mergeColored, setInstance, unitBox, vcMat, windowedMaterial } from './common';
 import { getField } from './field';
 import { canvasTexture, crowdTexture, dotTexture, flagTexture, textTexture, waterTexture, windowTexture } from './textures';
 
@@ -521,67 +521,8 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
 
   /* ------------------------------------------------ elevated L train */
   {
-    const l = lm('ltrain') ?? { x: -172, z: 230, rot: Math.PI / 2 };
-    const ax = 1, az = 0; // the line runs east-west, crossing the north-south roads
-    const x0 = -480, x1 = 60, deckY = 9.5;
-    const zc = l.z;
-    const steel = '#4e5a3c';
-    const parts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [
-      [new THREE.BoxGeometry(x1 - x0, 1.6, 0.6), steel, M.t((x0 + x1) / 2, deckY - 0.4, zc - 3.2)],
-      [new THREE.BoxGeometry(x1 - x0, 1.6, 0.6), steel, M.t((x0 + x1) / 2, deckY - 0.4, zc + 3.2)],
-      [new THREE.BoxGeometry(x1 - x0, 0.4, 7), '#3b4330', M.t((x0 + x1) / 2, deckY + 0.3, zc)],
-      [new THREE.BoxGeometry(x1 - x0, 0.25, 0.25), '#a7a7a7', M.t((x0 + x1) / 2, deckY + 0.6, zc - 0.8)],
-      [new THREE.BoxGeometry(x1 - x0, 0.25, 0.25), '#a7a7a7', M.t((x0 + x1) / 2, deckY + 0.6, zc + 0.8)],
-    ];
-    for (let x = x0 + 4; x < x1; x += 4) parts.push([new THREE.BoxGeometry(0.3, 1.6, 0.25), steel, M.trs(x, deckY - 0.4, zc - 3.2, 0, 0, 0.6)]);
-    for (let x = x0 + 4; x < x1; x += 4) parts.push([new THREE.BoxGeometry(0.3, 1.6, 0.25), steel, M.trs(x, deckY - 0.4, zc + 3.2, 0, 0, -0.6)]);
-    for (let x = x0 + 6; x < x1; x += 18) {
-      const ok = (z: number) => field.clearance(x, z) > 1.2;
-      if (ok(zc - 3) && ok(zc + 3)) {
-        parts.push([new THREE.BoxGeometry(0.8, deckY, 0.8), steel, M.t(x, deckY / 2 - 0.5, zc - 3.2)]);
-        parts.push([new THREE.BoxGeometry(0.8, deckY, 0.8), steel, M.t(x, deckY / 2 - 0.5, zc + 3.2)]);
-        parts.push([new THREE.BoxGeometry(0.4, 0.4, 7), steel, M.t(x, deckY - 2.6, zc)]);
-      }
-    }
-    // stations at both ends
-    for (const sx of [x0 + 16, x1 - 16]) {
-      parts.push([new THREE.BoxGeometry(32, 6, 11), '#8a5b3c', M.t(sx, deckY + 3.4, zc)]);
-      parts.push([new THREE.BoxGeometry(34, 0.8, 13), '#2e3a2a', M.t(sx, deckY + 6.8, zc)]);
-      parts.push([new THREE.BoxGeometry(4, deckY, 4), '#6b4a33', M.t(sx, deckY / 2, zc + 7)]);
-    }
-    const sm = new THREE.Mesh(bag.add(mergeColored(parts)), vc);
-    sm.castShadow = sm.receiveShadow = true;
-    group.add(sm);
-    placer.reserve((x0 + x1) / 2, zc, 0); // thin
-    for (let x = x0; x < x1; x += 10) placer.reserve(x, zc, 6);
-    // train: 4 cars
-    const carGeo = bag.add(
-      mergeColored([
-        [new THREE.BoxGeometry(14, 3.0, 3.0), '#d9dde2', M.t(0, 1.9, 0)],
-        [new THREE.BoxGeometry(14.05, 0.35, 3.05), '#d7262e', M.t(0, 1.2, 0)],
-        [new THREE.BoxGeometry(14.05, 0.25, 3.05), '#1f5fbf', M.t(0, 1.55, 0)],
-        [new THREE.BoxGeometry(12.5, 0.9, 3.08), '#24324a', M.t(0, 2.5, 0)],
-        [new THREE.BoxGeometry(13.6, 0.4, 2.6), '#9aa0a8', M.t(0, 3.5, 0)],
-        [new THREE.BoxGeometry(10, 0.7, 2.2), '#333', M.t(0, 0.4, 0)],
-      ]),
-    );
-    const train = new THREE.InstancedMesh(carGeo, vcGloss, 4);
-    train.castShadow = true;
-    train.frustumCulled = false;
-    group.add(train);
-    const span = x1 - x0 - 30;
-    updaters.push((_dt, t) => {
-      const cycle = 26;
-      const ph = (t % cycle) / cycle;
-      const dir = Math.floor(t / cycle) % 2 === 0 ? 1 : -1;
-      const head = x0 + 15 + ph * (span + 60) - 30;
-      for (let i = 0; i < 4; i++) {
-        let x = dir > 0 ? head - i * 14.5 : x1 - 15 - (head - x0 - 15) + i * 14.5;
-        x = Math.min(x1 - 8, Math.max(x0 + 8, x));
-        setInstance(train, i, x * ax, deckY + 0.5, zc + az, 0, 0, 0, 1);
-      }
-      train.instanceMatrix.needsUpdate = true;
-    });
+    const l = lm('ltrain') ?? { x: -172, z: 230 };
+    updaters.push(elevatedTrain(group, bag, placer, { x0: -480, x1: 60, z: l.z }));
   }
 
   /* ------------------------------------------------ river bridge at the gap */
