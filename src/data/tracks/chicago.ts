@@ -80,7 +80,7 @@ export const CHICAGO: TrackDef = {
     { kind: 'fountain', x: -250, z: 80 },
     { kind: 'ltrain', x: -172, z: 230, rot: Math.PI / 2 },
     { kind: 'bridge', x: -340, z: 153 },
-    { kind: 'river', x: -300, z: 153, rot: 0, scale: 100 },
+    { kind: 'river', x: -345, z: 153, rot: 0, scale: 110 },
     { kind: 'shore', x: 80, z: 0 },
     { kind: 'skyline', x: -260, z: 200 },
     { kind: 'lake', x: 300, z: 0 },

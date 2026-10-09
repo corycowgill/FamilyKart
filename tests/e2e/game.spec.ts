@@ -33,7 +33,8 @@ test.describe('Cowgill Kart Racing', () => {
     await waitScreen(page, 'race');
     await expect(page.locator('[data-testid=hud]')).toBeVisible();
 
-    // keyboard controls drive the kart once the countdown is over
+    // keyboard controls drive the kart once the countdown is over (skip the countdown: headless GL is slow)
+    await page.evaluate(() => (window as unknown as GameWin).__game.fastForward(3.8));
     await page.waitForFunction(() => ((window as unknown as GameWin).__game.state.time ?? -1) > 0.2, null, { timeout: 120_000 });
     await page.keyboard.down('KeyW');
     await page.waitForFunction(() => ((window as unknown as GameWin).__game.state.speed ?? 0) > 3, null, { timeout: 120_000 });

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { SceneryContext, SceneryHandle } from './types';
-import { Batch, M, ctxBits, mergeColored, setInstance, vcMat } from './common';
+import { Batch, ctxBits, disposeGroup, M, mergeColored, setInstance, vcMat } from './common';
 import { getField } from './field';
 import { canvasTexture, dotTexture, tileTexture } from './textures';
 
@@ -445,6 +445,7 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
       for (const u of updaters) u(dt, time);
     },
     dispose() {
+      disposeGroup(group);
       bag.dispose();
     },
   };

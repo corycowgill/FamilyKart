@@ -273,7 +273,7 @@ const STYLES: Record<TrackTheme, Style> = {
       canvasTexture(512, 512, (g, w, h, rng) => {
         g.fillStyle = '#f3f0ea';
         g.fillRect(0, 0, w, h);
-        g.strokeStyle = 'rgba(120,120,135,0.35)';
+        g.strokeStyle = 'rgba(120,120,135,0.14)';
         for (let i = 0; i < 14; i++) {
           g.lineWidth = rng.range(0.6, 2.2);
           g.beginPath();

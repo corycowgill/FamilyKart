@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { SceneryContext, SceneryHandle } from './types';
-import { Batch, M, PROPS, addClouds, ctxBits, flagGeometry, flagMaterial, mergeColored, setInstance, unitBox, windowedMaterial, vcMat, type Spot } from './common';
+import { addClouds, Batch, ctxBits, disposeGroup, flagGeometry, flagMaterial, M, mergeColored, PROPS, setInstance, type Spot, unitBox, vcMat, windowedMaterial } from './common';
 import { getField } from './field';
 import { flagTexture, textTexture, windowTexture } from './textures';
 
@@ -232,8 +232,8 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
     for (const s of placer.along(p, 15, off, 7.5, { jitter: 1.5 })) addHouse(s);
   }
   // fill the blocks beyond with more houses on a loose grid
-  const fillRect = { minX: b.minX - 160, maxX: b.maxX + 160, minZ: b.minZ - 160, maxZ: b.maxZ + 160 };
-  const step = quality === 'high' ? 17 : quality === 'medium' ? 21 : 28;
+  const fillRect = { minX: b.minX - 125, maxX: b.maxX + 125, minZ: b.minZ - 125, maxZ: b.maxZ + 125 };
+  const step = quality === 'high' ? 19 : quality === 'medium' ? 23 : 30;
   for (let x = fillRect.minX; x < fillRect.maxX; x += step) {
     for (let z = fillRect.minZ; z < fillRect.maxZ; z += 26) {
       const jx = x + rng.range(-2, 2), jz = z + rng.range(-2, 2);
@@ -383,6 +383,7 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
       for (const u of updaters) u(dt, time);
     },
     dispose() {
+      disposeGroup(group);
       bag.dispose();
     },
   };

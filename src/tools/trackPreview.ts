@@ -36,7 +36,7 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.3, 6000);
 const env = new Environment(scene, def.lighting, quality);
-const view = buildTrackView(track, quality);
+let view = buildTrackView(track, quality);
 scene.add(view.group);
 view.showDebug?.(params.get('debug') === '1');
 
@@ -66,13 +66,24 @@ if (showKarts) {
   });
 }
 
-let scenery: { update(dt: number, t: number): void } | null = null;
+let scenery: { update(dt: number, t: number): void; dispose?(): void } | null = null;
 const sceneryGroup = new THREE.Group();
 scene.add(sceneryGroup);
 const t0 = performance.now();
 SCENERY[def.theme]()
   .then((build) => {
     scenery = build({ track, group: sceneryGroup, quality });
+    if (params.get('rebuild') === '1') {
+      // exercise dispose + rebuild (leak / double-dispose check)
+      renderer.render(scene, camera);
+      scenery.dispose?.();
+      view.dispose();
+      const before = renderer.info.memory.geometries;
+      view = buildTrackView(track, quality);
+      scene.add(view.group);
+      scenery = build({ track, group: sceneryGroup, quality });
+      console.log(`rebuild ok (geometries after dispose ${before})`);
+    }
   })
   .catch((e) => {
     console.error(e);

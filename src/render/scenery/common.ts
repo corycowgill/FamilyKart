@@ -195,8 +195,8 @@ export const PROPS = {
     return mergeColored([
       [new THREE.CylinderGeometry(0.28, 0.4, 3.2, 6), trunk, M.t(0, 1.6, 0)],
       [new THREE.IcosahedronGeometry(2.6, 1), leaf, M.trs(0, 5, 0, 0, 0, 0, 1, 0.9, 1)],
-      [new THREE.IcosahedronGeometry(1.7, 1), leaf2, M.t(1.2, 6.2, 0.6)],
-      [new THREE.IcosahedronGeometry(1.6, 1), leaf2, M.t(-1.1, 5.8, -0.8)],
+      [new THREE.IcosahedronGeometry(1.7, 0), leaf2, M.t(1.2, 6.2, 0.6)],
+      [new THREE.IcosahedronGeometry(1.6, 0), leaf2, M.t(-1.1, 5.8, -0.8)],
     ]);
   },
   coneTree(leaf = '#2e7d4f', trunk = '#6b4a2b', snow?: string): THREE.BufferGeometry {
@@ -463,4 +463,19 @@ export function elevatedTrain(
     }
     train.instanceMatrix.needsUpdate = true;
   };
+}
+
+/** Dispose every geometry / material / instanced buffer under a group (each once). */
+export function disposeGroup(root: THREE.Object3D): void {
+  const seen = new Set<{ dispose(): void }>();
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.geometry) seen.add(m.geometry);
+    const mat = m.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(mat)) mat.forEach((x) => seen.add(x));
+    else if (mat) seen.add(mat);
+    if ((o as THREE.InstancedMesh).isInstancedMesh) seen.add(o as THREE.InstancedMesh);
+  });
+  for (const d of seen) d.dispose();
+  root.clear();
 }

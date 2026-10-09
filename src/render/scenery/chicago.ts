@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { SceneryContext, SceneryHandle } from './types';
-import { Batch, M, PROPS, addClouds, boxUV, ctxBits, elevatedTrain, flagGeometry, flagMaterial, mergeColored, setInstance, unitBox, vcMat, windowedMaterial } from './common';
+import { addClouds, Batch, boxUV, ctxBits, disposeGroup, elevatedTrain, flagGeometry, flagMaterial, M, mergeColored, PROPS, setInstance, unitBox, vcMat, windowedMaterial } from './common';
 import { getField } from './field';
 import { canvasTexture, crowdTexture, dotTexture, flagTexture, textTexture, waterTexture, windowTexture } from './textures';
 
@@ -391,9 +391,9 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     );
     const frameGeo = bag.add(
       mergeColored([
-        [new THREE.BoxGeometry(24.4, 7.6, 0.4), '#2f4f8f', M.t(0, 3.8, -8.6)],
-        [new THREE.BoxGeometry(0.4, 7.6, 8.6), '#2f4f8f', M.t(-12.2, 3.8, -4.3)],
-        [new THREE.BoxGeometry(0.4, 7.6, 8.6), '#2f4f8f', M.t(12.2, 3.8, -4.3)],
+        [new THREE.BoxGeometry(24.4, 7.6, 0.4), '#d7262e', M.t(0, 3.8, -8.6)],
+        [new THREE.BoxGeometry(0.4, 7.6, 8.6), '#f2f2f2', M.t(-12.2, 3.8, -4.3)],
+        [new THREE.BoxGeometry(0.4, 7.6, 8.6), '#f2f2f2', M.t(12.2, 3.8, -4.3)],
         [new THREE.BoxGeometry(25, 0.4, 10), '#e8e8e8', M.trs(0, 10.5, -4, -0.12, 0, 0)],
         [new THREE.CylinderGeometry(0.2, 0.2, 10, 6), '#e8e8e8', M.t(-11.8, 5.5, 0.4)],
         [new THREE.CylinderGeometry(0.2, 0.2, 10, 6), '#e8e8e8', M.t(11.8, 5.5, 0.4)],
@@ -660,6 +660,30 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     benches.build(group);
   }
 
+  /* ------------------------------------------------ beach with umbrellas north of the pier */
+  {
+    const bz0 = 110, bz1 = 420;
+    const sand = new THREE.Mesh(bag.add(new THREE.PlaneGeometry(26, bz1 - bz0)), bag.add(new THREE.MeshStandardMaterial({ color: '#f3dca4', roughness: 1 })));
+    sand.rotation.x = -Math.PI / 2;
+    sand.position.set(shoreX + 10, -0.75, (bz0 + bz1) / 2);
+    sand.receiveShadow = true;
+    group.add(sand);
+    const umb = bag.add(mergeColored([
+      [new THREE.CylinderGeometry(0.06, 0.06, 3, 5), '#eeeeee', M.t(0, 1.5, 0)],
+      [new THREE.ConeGeometry(1.8, 0.8, 8), '#ffffff', M.t(0, 3.1, 0)],
+    ]));
+    const umbrellas = new Batch(umb, vc, { name: 'umbrellas' });
+    const towels = new Batch(bag.add(new THREE.PlaneGeometry(1.2, 2.2).rotateX(-Math.PI / 2).translate(0, 0.03, 0)), bag.add(new THREE.MeshStandardMaterial({ roughness: 1 })), { cast: false });
+    const cols = ['#ff4d6d', '#ffd23f', '#3aa8ff', '#3ccf6e', '#ff8a3d', '#b26bff'];
+    for (let z = bz0 + 8; z < bz1 - 8; z += rng.range(9, 16)) {
+      const x = shoreX + rng.range(3, 18);
+      umbrellas.add(x, -0.75, z, rng.next() * 6, 1, 1, 1, rng.pick(cols));
+      towels.add(x + 1.6, -0.75, z + rng.range(-1, 1), rng.range(-0.3, 0.3), 1, 1, 1, rng.pick(cols));
+    }
+    umbrellas.build(group);
+    towels.build(group);
+  }
+
   /* ------------------------------------------------ seagulls */
   {
     const gullGeo = bag.add(
@@ -701,6 +725,7 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
       for (const u of updaters) u(dt, time);
     },
     dispose() {
+      disposeGroup(group);
       bag.dispose();
     },
   };

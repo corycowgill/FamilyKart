@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { TrackSample } from '../../sim/track/Track';
 import type { SceneryContext, SceneryHandle } from './types';
-import { Batch, M, PROPS, boxUV, ctxBits, elevatedTrain, mergeColored, setInstance, unitBox, vcMat, windowedMaterial } from './common';
+import { Batch, boxUV, ctxBits, disposeGroup, elevatedTrain, M, mergeColored, PROPS, setInstance, unitBox, vcMat, windowedMaterial } from './common';
 import { getField } from './field';
 import { canvasTexture, dotTexture, textTexture, windowLitTexture, windowTexture } from './textures';
 
@@ -397,6 +397,7 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
       for (const u of updaters) u(dt, time);
     },
     dispose() {
+      disposeGroup(group);
       bag.dispose();
     },
   };

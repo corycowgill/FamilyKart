@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { TrackSample } from '../../sim/track/Track';
 import type { SceneryContext, SceneryHandle } from './types';
-import { Batch, M, PROPS, addClouds, ctxBits, mergeColored, setInstance, vcMat } from './common';
+import { addClouds, Batch, ctxBits, disposeGroup, M, mergeColored, PROPS, setInstance, vcMat } from './common';
 import { getField } from './field';
 import { canvasTexture, textTexture } from './textures';
 
@@ -429,6 +429,7 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
       for (const u of updaters) u(dt, time);
     },
     dispose() {
+      disposeGroup(group);
       bag.dispose();
     },
   };
