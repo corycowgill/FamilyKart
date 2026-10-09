@@ -2,6 +2,7 @@ import { audio } from '../audio/AudioEngine';
 import { CHARACTERS, characterById } from '../data/characters';
 import { CUPS, TRACKS, trackById } from '../data/tracks/index';
 import { DEFAULT_KEYS_P1, Input, type Action, type KeyMap } from '../input/Input';
+import { isTouchDevice, TouchControls } from '../input/TouchControls';
 import { formatTime, Save } from '../persist/Save';
 import { Podium } from '../render/Podium';
 import { Renderer } from '../render/Renderer';
@@ -74,7 +75,9 @@ export class Game {
     this.difficulty = s.difficulty;
     this.players = [s.lastCharacter];
     this.trackId = TRACKS.some((t) => t.id === s.lastTrack) ? s.lastTrack : TRACKS[0].id;
-    this.renderer.setQuality(s.quality);
+    // phones and tablets start on medium graphics unless the player picked a quality themselves
+    if (isTouchDevice() && !s.qualityChosen && s.quality === 'high' && !window.matchMedia?.('(any-pointer: fine)').matches) this.save.updateSettings({ quality: 'medium' });
+    this.renderer.setQuality(this.save.settings.quality);
     audio.setVolumes(s.master, s.music, s.sfx);
     if (s.keys) this.input.setKeyMap(0, { ...DEFAULT_KEYS_P1, ...(s.keys as Partial<KeyMap>) } as KeyMap);
     const params = new URLSearchParams(location.search);
@@ -88,7 +91,13 @@ export class Game {
       if (n === 0 && this.session && this.screenName === 'race' && !this.pauseEl) this.togglePause();
     };
     // unlock audio on the first interaction
-    const unlock = () => {
+    const unlock = (e: Event) => {
+      // phones: go fullscreen + landscape on the first tap where the browser allows it (not iOS Safari)
+      if ((e as PointerEvent).pointerType === 'touch' && document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => {
+          (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {});
+        }).catch(() => {});
+      }
       audio.init().then(() => {
         if (this.screenName === 'title' || this.screenName === 'menu') audio.startMusic('menu');
       });
@@ -201,19 +210,19 @@ export class Game {
     const el = h('div', { class: 'title-screen' },
       h('div', { class: 'vignette' }),
       h('div', { class: 'logo', html: '<span class="l1">COWGILL</span><span class="l2"><span class="flag">🏁</span> KART RACING <span class="flag">🏁</span></span>' }),
-      h('div', { class: 'press-start' }, '', h('span', { class: 'kb-only' }, 'Press any key or click to start'), h('span', { class: 'pad-only' }, 'Press Ⓐ to start')),
+      h('div', { class: 'press-start' }, '', h('span', { class: 'kb-only' }, 'Press any key or click to start'), h('span', { class: 'pad-only' }, 'Press Ⓐ to start'), h('span', { class: 'touch-only' }, 'Tap to start')),
       h('div', { class: 'footer-hint' }, 'Dad · Mom · Brennan · Parker · Lupin · Grandma'),
     );
     const go = (e?: Event) => {
       this.titleGo = null;
       e?.preventDefault();
       window.removeEventListener('keydown', go);
-      el.removeEventListener('pointerdown', go);
+      el.removeEventListener('click', go);
       audio.play('menuSelect');
       this.showMainMenu();
     };
     window.addEventListener('keydown', go);
-    el.addEventListener('pointerdown', go);
+    el.addEventListener('click', go); // click, not pointerdown: the rest of the tap must not land on the menu
     this.titleGo = go;
     this.show('title', el);
   }
@@ -236,7 +245,7 @@ export class Game {
           this.btn('Settings', 'gray small', () => this.showSettings(), 'btn-settings')),
       ),
       h('div', { class: 'corner-stats' }, `Races: ${t.races} · Wins: ${t.wins}`),
-      h('div', { class: 'footer-hint' }, h('span', { class: 'kb-only' }, 'Mouse, keyboard (arrows + Enter) or Xbox controller'), h('span', { class: 'pad-only' }, '🎮 Controller connected · D-pad / stick to move · Ⓐ select · Ⓑ back')),
+      h('div', { class: 'footer-hint' }, h('span', { class: 'kb-only' }, 'Mouse, keyboard (arrows + Enter) or Xbox controller'), h('span', { class: 'pad-only' }, '🎮 Controller connected · D-pad / stick to move · Ⓐ select · Ⓑ back'), h('span', { class: 'touch-only' }, 'Race with on-screen controls: slide to steer, hold DRIFT in corners')),
     );
     el.querySelector<HTMLElement>('.menu-list .btn')?.setAttribute('data-autofocus', '');
     this.show('menu', el);
@@ -301,7 +310,7 @@ export class Game {
     const el = h('div', { class: 'char-screen' },
       h('div', { class: 'char-top' },
         h('div', { class: 'screen-title' }, this.mode === 'versus' ? `Player ${playerSlot + 1}: Choose Your Racer` : 'Choose Your Racer'),
-        h('div', { class: 'screen-sub' }, h('span', { class: 'kb-only' }, 'Drag the kart to spin it around'), h('span', { class: 'pad-only' }, 'Left stick to choose · Right stick to spin · Ⓐ to pick · Ⓑ back'))),
+        h('div', { class: 'screen-sub' }, h('span', { class: 'kb-only' }, 'Drag the kart to spin it around'), h('span', { class: 'pad-only' }, 'Left stick to choose · Right stick to spin · Ⓐ to pick · Ⓑ back'), h('span', { class: 'touch-only' }, 'Tap a racer · drag the kart to spin it'))),
       info,
       h('div', {},
         cards,
@@ -444,6 +453,11 @@ export class Game {
     this.ui.querySelectorAll('.screen').forEach((s) => s.remove());
     this.screenName = 'race';
     this.ui.append(this.hud.root);
+    if (isTouchDevice() && this.mode !== 'versus') {
+      this.touch = new TouchControls(this.ui);
+      this.touch.onPause = () => this.togglePause();
+      this.input.touch = this.touch;
+    }
     session.startAudio();
   }
 
@@ -457,6 +471,9 @@ export class Game {
   }
 
   private disposeSession(): void {
+    this.touch?.dispose();
+    this.touch = null;
+    this.input.touch = null;
     this.session?.dispose();
     this.session = null;
     this.hud?.dispose();
@@ -586,6 +603,7 @@ export class Game {
       return;
     }
     s.setPaused(true);
+    this.touch?.reset();
     audio.play('menuBack');
     const list = h('div', { class: 'menu-list' },
       this.btn('Resume', 'green', () => this.togglePause(), 'btn-resume'),
@@ -653,7 +671,7 @@ export class Game {
     };
     const quality = h('select', {}, ...(['low', 'medium', 'high'] as const).map((q) => h('option', { value: q, selected: s.quality === q }, q[0].toUpperCase() + q.slice(1))));
     quality.addEventListener('change', () => {
-      this.save.updateSettings({ quality: quality.value as 'low' | 'medium' | 'high' });
+      this.save.updateSettings({ quality: quality.value as 'low' | 'medium' | 'high', qualityChosen: true });
       this.renderer.setQuality(this.save.settings.quality);
     });
     const check = (label: string, key: 'steeringAssist' | 'showFps', after?: () => void) => {
@@ -792,10 +810,22 @@ export class Game {
   }
 
   private titleGo: ((e?: Event) => void) | null = null;
+  private touch: TouchControls | null = null;
+  private touchMode = false;
   private padMode = false;
 
   /** Switch on-screen prompts between keyboard and Xbox controller glyphs. */
   private updateDeviceMode(): void {
+    const touch = this.input.lastDevice === 'touch';
+    if (touch !== this.touchMode) {
+      this.touchMode = touch;
+      document.body.classList.toggle('touch-mode', touch);
+    }
+    if (this.touch && this.session) {
+      const k = this.session.players[0];
+      if (k) this.touch.setAvailability(!!k.item, k.specialCooldown <= 0);
+      this.touch.root.style.display = this.pauseEl || this.resultsShown ? 'none' : '';
+    }
     const pad = this.input.lastDevice === 'gamepad';
     if (pad !== this.padMode) {
       this.padMode = pad;

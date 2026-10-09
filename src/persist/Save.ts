@@ -12,6 +12,8 @@ export interface Settings {
   lastCharacterP2: CharacterId;
   lastTrack: string;
   keys?: Record<string, string[]>;
+  /** true once the player picked a graphics quality themselves */
+  qualityChosen?: boolean;
 }
 
 export interface TrackRecord {

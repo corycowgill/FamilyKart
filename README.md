@@ -31,6 +31,8 @@ npm run dev        # http://localhost:5173
 
 Xbox One / Series / 360 controllers work over USB or Bluetooth in Chrome, Edge and Firefox (press any button once so the browser exposes it). Menus: D-pad or left stick to move, A select, B back; right stick spins the kart on the character screen. Controllers rumble on hits, boosts and the finish (Chrome/Edge). On-screen prompts switch to controller buttons automatically.
 
+**Phones & tablets:** on-screen touch controls appear automatically. Slide anywhere on the left half to steer (a floating stick), hold the blue **DRIFT** button through corners, tap **ITEM** / **SPECIAL** when they light up, and hold **BRAKE** to slow down or reverse. Gas is automatic. Turn the device sideways; on Android the game goes fullscreen in landscape on the first tap. Phones start on Medium graphics.
+
 2-player split screen: P1 uses WASD + Space/E/F, P2 uses arrows + Right-Shift / Enter / Comma. With one controller it goes to Player 2 (Player 1 stays on the keyboard); with two controllers each player gets one.
 
 Steering assist for younger racers can be turned on in Settings or on the track-select screen.

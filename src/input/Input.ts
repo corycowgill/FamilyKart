@@ -1,5 +1,6 @@
 import type { KartInput } from '../sim/types';
 import { BTN, Gamepads, type MenuAction, type PadState } from './Gamepads';
+import { isTouchDevice, type TouchControls } from './TouchControls';
 
 export type Action = 'up' | 'down' | 'left' | 'right' | 'drift' | 'item' | 'special' | 'rear' | 'pause';
 
@@ -39,9 +40,12 @@ export class Input {
   private split = false;
   private smoothSteer = [0, 0];
   /** 'gamepad' after controller input, 'keyboard' after a key press - drives on-screen prompts. */
-  lastDevice: 'keyboard' | 'gamepad' = 'keyboard';
+  lastDevice: 'keyboard' | 'gamepad' | 'touch' = 'keyboard';
+  /** On-screen touch controls for player 1 (present only during a race on touch devices). */
+  touch: TouchControls | null = null;
 
   constructor(target: Window = window) {
+    if (isTouchDevice() && !window.matchMedia?.('(any-pointer: fine)').matches) this.lastDevice = 'touch';
     target.addEventListener('keydown', (e) => {
       if (!e.repeat) this.pressedQueue.push(e.code);
       this.lastDevice = 'keyboard';
@@ -49,6 +53,9 @@ export class Input {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code) && !(e.target instanceof HTMLInputElement)) e.preventDefault();
     });
     target.addEventListener('keyup', (e) => this.down.delete(e.code));
+    target.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') this.lastDevice = 'touch';
+    }, { capture: true });
     target.addEventListener('blur', () => this.down.clear());
   }
 
@@ -117,6 +124,14 @@ export class Input {
       useItem = useItem || pad.buttons[BTN.A];
       useSpecial = useSpecial || pad.buttons[BTN.X];
       rear = rear || pad.buttons[BTN.Y];
+    }
+    if (player === 0 && this.touch && (this.lastDevice === 'touch' || this.touch.active)) {
+      const t = this.touch.state();
+      if (t.steer !== 0) steer = t.steer;
+      throttle = t.throttle;
+      drift = drift || t.drift;
+      useItem = useItem || t.item;
+      useSpecial = useSpecial || t.special;
     }
     throttle = Math.max(-1, Math.min(1, throttle));
     return { throttle, steer, drift, useItem, useSpecial, rearView: rear };
