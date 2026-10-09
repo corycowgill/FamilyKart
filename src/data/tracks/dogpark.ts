@@ -76,7 +76,7 @@ export const DOGPARK: TrackDef = {
     { t: f(400, 180), impulse: 6, length: 7 },
   ],
   gaps: [{ from: gapStart, to: gapEnd }],
-  itemRows: [f(0, -60), f(100, 240), f(330, 280), f(340, -10), f(340, -130), f(60, -170)],
+  itemRows: [f(-14, 112), f(100, 240), f(330, 280), f(340, -10), f(340, -130), f(60, -170)],
   hazards: [
     { kind: 'tennisBallCannon', t: f(340, -60), sweep: 6, period: 4.5, radius: 2.3 },
     { kind: 'tennisBallCannon', t: f(40, -170), sweep: 6, period: 5, radius: 2.3 },

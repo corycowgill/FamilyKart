@@ -61,6 +61,7 @@ export class RaceSim {
   private prevDrift: boolean[] = [];
   private finishCount = 0;
   private firstHumanFinish = -1;
+  private aiDoneAt = -1;
   private lastCountdown = 4;
   private readonly finishGrace: number;
   private readonly timeLimit: number;
@@ -343,7 +344,13 @@ export class RaceSim {
     const allFinished = this.karts.every((k) => k.finished);
     const humansDone = humans.length > 0 && humans.every((k) => k.finished);
     const graceOver = humansDone && this.firstHumanFinish >= 0 && this.time - this.firstHumanFinish > this.finishGrace;
-    if (allFinished || graceOver || this.time > this.timeLimit || (this.mode === 'timeTrial' && humansDone)) {
+    // everyone else is home: give stragglers a short grace period, then call the race
+    const ais = this.karts.filter((k) => !k.isHuman);
+    if (ais.length && ais.every((k) => k.finished) && !humansDone) {
+      if (this.aiDoneAt < 0) this.aiDoneAt = this.time;
+    }
+    const stragglerOver = this.aiDoneAt >= 0 && this.time - this.aiDoneAt > 20;
+    if (allFinished || graceOver || stragglerOver || this.time > this.timeLimit || (this.mode === 'timeTrial' && humansDone)) {
       this.phase = 'finished';
       // award remaining places by progress
       const rest = this.karts.filter((k) => !k.finished).sort((a, b) => b.raceDistance - a.raceDistance);

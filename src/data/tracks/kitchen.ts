@@ -71,7 +71,7 @@ export const KITCHEN: TrackDef = {
   ],
   ramps: [{ t: gapStart - 0.0015, impulse: 9, length: 10 }],
   gaps: [{ from: gapStart, to: gapEnd }],
-  itemRows: [f(-180, 100), f(-90, 190), f(110, 190), f(300, 10), f(-20, -190)],
+  itemRows: [f(-180, 60), f(45, 190), f(190, 125), f(300, 10), f(-20, -190)],
   hazards: [
     { kind: 'rollingFruit', t: f(300, 30), sweep: 9, period: 5, radius: 2.6 },
     { kind: 'rollingFruit', t: f(-120, -190), sweep: 8, period: 4.2, radius: 2.4 },
