@@ -2039,3 +2039,170 @@ export function buildChicagoFlag(k: Kit, scale = 1): { add(x: number, y: number,
     },
   };
 }
+
+/* ================================================================== lake, river, bascule bridges */
+
+/**
+ * Lake Michigan east of x = shoreX: animated water plane, seawall + railing along the shore and
+ * `boats` sailboats cruising (animated). zRange limits the seawall / boat lanes.
+ */
+export function buildLakeMichigan(k: Kit, shoreX: number, zRange: [number, number], boats = 16): THREE.MeshStandardMaterial {
+  const rng = new Rng(77);
+  const waterTex = k.bag.add(waterTextureLocal('#2b8be0', '#bfe9ff'));
+  waterTex.repeat.set(220, 220);
+  const lakeMat = k.bag.add(new THREE.MeshStandardMaterial({ color: '#4aa6f0', map: waterTex, roughness: 0.12, metalness: 0.25 }));
+  const lake = new THREE.Mesh(k.bag.add(new THREE.PlaneGeometry(5000, 5000)), lakeMat);
+  lake.rotation.x = -Math.PI / 2;
+  lake.position.set(shoreX + 2500 - 4, -0.9, (zRange[0] + zRange[1]) / 2);
+  lake.receiveShadow = true;
+  lake.name = 'lakeMichigan';
+  k.group.add(lake);
+  k.updaters.push((dt) => {
+    waterTex.offset.x += dt * 0.004;
+    waterTex.offset.y += dt * 0.0025;
+  });
+  const [z0, z1] = [zRange[0] - 400, zRange[1] + 400];
+  k.solid.push([new THREE.BoxGeometry(3, 2.2, z1 - z0), '#d8d2c4', M.t(shoreX - 1.5, -0.9, (z0 + z1) / 2)]);
+  k.solid.push([new THREE.BoxGeometry(0.3, 0.9, z1 - z0), '#5a6470', M.t(shoreX - 0.2, 0.6, (z0 + z1) / 2)]);
+  if (boats <= 0) return lakeMat;
+  const sail = new THREE.BufferGeometry();
+  sail.setAttribute('position', new THREE.Float32BufferAttribute([0, 1.2, 0.2, 0, 9, 0.2, 0, 1.2, -3.4, 0, 1.2, 0.2, 0, 1.2, -3.4, 0, 9, 0.2], 3));
+  sail.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(12).fill(0), 2));
+  sail.computeVertexNormals();
+  const jib = new THREE.BufferGeometry();
+  jib.setAttribute('position', new THREE.Float32BufferAttribute([0, 1.2, 0.6, 0, 7.5, 0.4, 0, 1.2, 3.2, 0, 1.2, 0.6, 0, 1.2, 3.2, 0, 7.5, 0.4], 3));
+  jib.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(12).fill(0), 2));
+  jib.computeVertexNormals();
+  const geo = k.bag.add(mergeColored([
+    [new THREE.BoxGeometry(1.8, 0.9, 6.5), '#f4f4f0', M.t(0, 0.3, 0)],
+    [new THREE.BoxGeometry(1.9, 0.18, 6.6), '#1d3f73', M.t(0, 0.62, 0)],
+    [new THREE.CylinderGeometry(0.07, 0.09, 9.5, 5), '#dddddd', M.t(0, 5, 0.3)],
+    [sail, '#ffffff'],
+    [jib, '#ff6b6b'],
+  ]));
+  const mat = tintMaskMat(k.bag, { roughness: 0.6, side: THREE.DoubleSide });
+  const data = Array.from({ length: boats }, () => ({ x: shoreX + rng.range(60, 600), z: rng.range(z0, z1), yaw: rng.range(-0.6, 0.6) + (rng.chance(0.5) ? Math.PI : 0), v: rng.range(1.5, 4), ph: rng.next() * 6 }));
+  const im = new THREE.InstancedMesh(geo, mat, boats);
+  const cols = ['#ffffff', '#ffe066', '#ff8fab', '#9be7ff', '#ffffff', '#c3f584', '#41B6E6'];
+  data.forEach((_, i) => im.setColorAt(i, new THREE.Color(cols[i % cols.length])));
+  im.frustumCulled = false;
+  im.castShadow = true;
+  im.name = 'sailboats';
+  k.group.add(im);
+  k.updaters.push((dt, t) => {
+    data.forEach((b, i) => {
+      b.z += Math.cos(b.yaw) * b.v * dt;
+      b.x += Math.sin(b.yaw) * b.v * dt;
+      if (b.z > z1) b.z = z0;
+      if (b.z < z0) b.z = z1;
+      setInstance(im, i, b.x, -0.75 + Math.sin(t * 1.3 + b.ph) * 0.15, b.z, Math.sin(t * 1.1 + b.ph) * 0.05, b.yaw, Math.sin(t * 0.9 + b.ph) * 0.08 + 0.12, 1.6);
+    });
+    im.instanceMatrix.needsUpdate = true;
+  });
+  return lakeMat;
+}
+
+function waterTextureLocal(base: string, light: string): THREE.CanvasTexture {
+  return canvasTexture(256, 256, (g, w, h, rng) => {
+    g.fillStyle = base;
+    g.fillRect(0, 0, w, h);
+    g.strokeStyle = light;
+    g.lineCap = 'round';
+    for (let i = 0; i < 90; i++) {
+      g.globalAlpha = rng.range(0.25, 0.7);
+      g.lineWidth = rng.range(1, 2.5);
+      const x = rng.next() * w, y = rng.next() * h, l = rng.range(8, 26);
+      g.beginPath();
+      g.moveTo(x, y);
+      g.quadraticCurveTo(x + l / 2, y - 3, x + l, y);
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+  }, { seed: 91 });
+}
+
+export interface RiverChannel { cx: number; cz: number; ax: number; az: number; halfLen: number; halfWidth: number }
+
+/**
+ * St. Patrick's-green Chicago River over a terrain channel (TrackField channel): water overlay at
+ * y = waterY, stone river walls, a Riverwalk ledge with umbrellas, and `tourBoats` cruising
+ * (keep `clearAt` (local x along the river) free of umbrellas, e.g. under a jump).
+ */
+export function buildGreenRiver(k: Kit, c: RiverChannel, o: { waterY?: number; tourBoats?: number; clearAt?: number } = {}): void {
+  const rng = new Rng(31);
+  const ang = -Math.atan2(c.az, c.ax);
+  const base = M.trs(c.cx, 0, c.cz, 0, ang, 0);
+  const at = (lx: number, ly: number, lz: number, ry = 0) => base.clone().multiply(M.trs(lx, ly, lz, 0, ry, 0));
+  const tex = k.bag.add(waterTextureLocal('#13b24a', '#9dffb5'));
+  tex.repeat.set((c.halfLen * 2) / 14, (c.halfWidth * 2) / 14);
+  const mat = k.bag.add(new THREE.MeshStandardMaterial({ color: '#2fe06a', map: tex, roughness: 0.12, metalness: 0.15, emissive: '#0b5a26', emissiveIntensity: 0.35 }));
+  const river = new THREE.Mesh(k.bag.add(new THREE.PlaneGeometry(c.halfLen * 2 + 4, c.halfWidth * 2 + 8).rotateX(-Math.PI / 2)), mat);
+  river.applyMatrix4(at(0, o.waterY ?? -2.05, 0));
+  river.receiveShadow = true;
+  river.name = 'greenRiver';
+  k.group.add(river);
+  k.updaters.push((dt) => {
+    tex.offset.x -= dt * 0.03;
+  });
+  const clear = o.clearAt ?? 1e9;
+  for (const side of [-1, 1]) {
+    k.solid.push([new THREE.BoxGeometry(c.halfLen * 2, 7.2, 1.2), '#bdb6a6', at(0, -3.3, side * (c.halfWidth + 1))]);
+    k.solid.push([new THREE.BoxGeometry(c.halfLen * 2, 0.5, 2.4), '#d8cfbd', at(0, -0.95, side * (c.halfWidth - 0.4))]);
+    for (let lx = -c.halfLen + 8; lx < c.halfLen - 8; lx += 16) {
+      if (Math.abs(lx - clear) < 20) continue;
+      k.solid.push([new THREE.CylinderGeometry(0.05, 0.05, 2.2, 4), '#dddddd', at(lx, 0.4, side * (c.halfWidth - 0.6))]);
+      k.solid.push([new THREE.ConeGeometry(1.3, 0.6, 8), rng.pick(['#e8392b', '#ffd23f', '#1f8f3a', '#2f7de1']), at(lx, 1.6, side * (c.halfWidth - 0.6))]);
+    }
+  }
+  const nb = o.tourBoats ?? 2;
+  if (nb <= 0) return;
+  const boatGeo = k.bag.add(mergeColored([
+    [new THREE.BoxGeometry(11, 1.4, 3.8), '#ffffff', M.t(0, 0.4, 0)],
+    [new THREE.BoxGeometry(11.1, 0.3, 3.9), '#1b2f5c', M.t(0, 1.0, 0)],
+    [new THREE.BoxGeometry(6, 1.3, 3.2), '#eef3f8', M.t(-1.5, 1.8, 0)],
+    [new THREE.BoxGeometry(5.6, 0.7, 3.25), '#33506e', M.t(-1.5, 1.9, 0)],
+    [new THREE.BoxGeometry(6.4, 0.15, 3.6), '#ffd23f', M.t(-1.5, 2.5, 0)],
+  ]));
+  const im = new THREE.InstancedMesh(boatGeo, tintMaskMat(k.bag, { roughness: 0.4 }), nb);
+  for (let i = 0; i < nb; i++) im.setColorAt(i, new THREE.Color(i % 2 ? '#fff4d6' : '#e8f4ff'));
+  im.frustumCulled = false;
+  im.castShadow = true;
+  im.name = 'tourBoats';
+  k.group.add(im);
+  const tm = new THREE.Matrix4();
+  k.updaters.push((_dt, t) => {
+    for (let i = 0; i < nb; i++) {
+      const span = c.halfLen * 2 - 24;
+      const ph = (t / 40 + i / nb) % 2;
+      const f = ph < 1 ? ph : 2 - ph;
+      tm.copy(base).multiply(M.trs(-span / 2 + f * span, (o.waterY ?? -2.05) + 0.2 + Math.sin(t * 1.4 + i) * 0.06, (i % 2 ? 1 : -1) * Math.min(2.6, c.halfWidth * 0.3), 0, ph < 1 ? 0 : Math.PI, 0));
+      im.setMatrixAt(i, tm);
+    }
+    im.instanceMatrix.needsUpdate = true;
+  });
+}
+
+/**
+ * One raised red bascule leaf truss (pair of side girders rising toward the river), hinged at
+ * (x, y, z), pointing along yaw (its +Z), opened by `angle` radians, length `len`, plus a tender
+ * house behind the hinge. Use one per bank and road side to frame a jump.
+ */
+export function basculeLeaf(k: Kit, x: number, y: number, z: number, yaw: number, angle = 0.75, len = 11, width = 1.2): void {
+  const b = M.trs(x, y, z, 0, yaw, 0);
+  const leaf = L(b, M.trs(0, 0, 0, -angle, 0, 0));
+  const red = '#b3202a';
+  k.gloss.push([new THREE.BoxGeometry(width, 0.6, len), red, L(leaf, M.t(0, 0, len / 2))]);
+  k.gloss.push([new THREE.BoxGeometry(width, 0.6, len), red, L(leaf, M.t(0, 2.6, len / 2 - 0.4))]);
+  const n = Math.max(3, Math.round(len / 2.2));
+  for (let i = 0; i <= n; i++) {
+    const zz = (i / n) * len;
+    const hh = 2.6 * (1 - (i / n) * 0.15);
+    k.gloss.push([new THREE.BoxGeometry(width * 0.5, hh, 0.3), red, L(leaf, M.t(0, hh / 2, zz))]);
+    if (i < n) beam(k.gloss, [0, 0.1, zz], [0, hh - 0.1, zz + len / n], 0.25, red, leaf);
+  }
+  // counterweight + tender house
+  k.solid.push([new THREE.BoxGeometry(2.4, 2.4, 2.4), '#5a5f66', L(leaf, M.t(0, -0.6, -1.6))]);
+  k.solid.push([new THREE.BoxGeometry(5, 6, 5), '#e8dcc0', L(b, M.t(0, 3, -6))]);
+  k.solid.push([new THREE.ConeGeometry(4, 3, 4).rotateY(Math.PI / 4), '#3f8f7a', L(b, M.t(0, 7.5, -6))]);
+  k.solid.push([new THREE.BoxGeometry(1.6, 1.6, 0.2), '#1d2b3f', L(b, M.t(0, 3.6, -3.45))]);
+}

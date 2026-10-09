@@ -5,7 +5,7 @@
  * both live and inside an OfflineAudioContext.
  *
  * Chicago flavour: four styles get their own arrangers in the city's home-grown genres —
- *   menu    -> "Sweet Home" blues ANTHEM: an original 12-bar shuffle in A with a composed harmonica
+ *   menu, blues (the "Sweet Home Chicago" track) -> "Sweet Home" blues ANTHEM: an original 12-bar shuffle in A with a composed harmonica
  *              head, boogie bass, triplet piano + organ, a stop-time break and a horn-section out-chorus
  *   rock    -> fast Chicago BLUES shuffle for the Chicago Grand Prix (12-bar form, boogie bass,
  *              harmonica call-and-response, organ chops, horn stabs on the final lap)
@@ -17,8 +17,8 @@ import { Rng } from '../core/rng';
 import { type Ctx, fm, midiToHz, noise, tone } from './synth';
 
 export type ScaleName = TrackDef['music']['scale'];
-export type MusicStyle = 'rock' | 'funk' | 'bouncy' | 'kitchen' | 'dogpark' | 'snow' | 'menu' | 'results';
-export const MUSIC_STYLES: MusicStyle[] = ['rock', 'funk', 'bouncy', 'kitchen', 'dogpark', 'snow', 'menu', 'results'];
+export type MusicStyle = 'rock' | 'funk' | 'bouncy' | 'kitchen' | 'dogpark' | 'snow' | 'menu' | 'results' | 'blues';
+export const MUSIC_STYLES: MusicStyle[] = ['rock', 'funk', 'bouncy', 'kitchen', 'dogpark', 'snow', 'menu', 'results', 'blues'];
 
 export interface MusicSpec {
   style: MusicStyle;
@@ -127,6 +127,15 @@ const P: Record<MusicStyle, Preset> = {
     rhythms: ['x.x.x...x.x.x...'],
     progA: [[0, 3, 0, 0]], progB: [[4, 3, 0, 4]], extraPerc: 'ohat',
   },
+  // "Sweet Home Chicago" track: the same original anthem, played in the track's key/tempo (E, 124 by data)
+  blues: {
+    defaults: { tempo: 120, root: 64, scale: 'mixolydian' },
+    kick: 'x.....x.x.......', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.',
+    snareInst: 'snare', hatInst: 'hat', swing: 0, shuffle: 0.62, form: 'anthem', level: 0.9,
+    bass: 'upright', bassPat: 'walk', chord: 'piano', chordSteps: [2, 6, 10, 14], lead: 'harp', leadMaxLen: 8,
+    rhythms: ['x.x.x...x.x.x...'],
+    progA: [[0, 3, 0, 0]], progB: [[4, 3, 0, 4]], extraPerc: 'ohat',
+  },
   // Results / podium: a Chicago HOUSE party (Arranger.buildHouse)
   results: {
     defaults: { tempo: 124, root: 60, scale: 'major' },
@@ -161,6 +170,7 @@ export function resolveMusic(arg: unknown): MusicSpec {
 function styleFromString(s: string): MusicStyle {
   const k = s.toLowerCase();
   if ((MUSIC_STYLES as string[]).includes(k)) return k as MusicStyle;
+  if (/blues|boogie|shuffle|sweet ?home|anthem|harmonica/.test(k)) return 'blues';
   if (/rock|chicago|city|metal|punk/.test(k)) return 'rock';
   if (/funk|suburb|groove|disco/.test(k)) return 'funk';
   if (/kitchen|pizz|xylo|quirk|cook/.test(k)) return 'kitchen';
@@ -432,7 +442,7 @@ class Arranger {
     const steps: Ev[][] = Array.from({ length: choruses * 12 * 16 }, () => []);
     const form = [0, 5, 0, 0, 5, 5, 0, 0, 7, 5, 0, 7];
     const key = this.root;
-    const harp = key + 12;
+    const harp = key + 12 > 72 ? key : key + 12; // keep the harmonica head in a bright-but-friendly register
     type Riff = Array<[number, number, number, number?]>; // [step from chorus start, semitones, len, bend]
     const call: Riff = [[0, 7, 2], [2, 10, 2], [4, 12, 4, 1], [10, 10, 2], [12, 12, 2], [14, 15, 2, 1], [16, 12, 6], [24, 10, 2], [26, 7, 2], [28, 10, 4]];
     const head: Riff = [

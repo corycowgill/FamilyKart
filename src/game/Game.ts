@@ -392,14 +392,14 @@ export class Game {
       const rec = this.save.data.records[t.id];
       const canvas = h('canvas', { width: 320, height: 200 });
       drawTrackPreview(canvas, t);
-      const st = stationFor(t.theme);
+      const st = stationFor(t.theme, t.id);
       const card = h('button', { class: `track-card${t.id === this.trackId ? ' selected' : ''}`, 'data-nav': true, 'data-testid': `track-${t.id}`, style: `--line:${CTA[st.line]}` },
         canvas,
         h('div', { class: 'tc-body' },
-          h('div', { class: 'tc-line', html: `${lineBullet(st.line, '★')}<span class="ln">${st.lineName}</span><span class="ns">› <b>${esc(st.stop)}</b></span>` }),
+          h('div', { class: 'tc-line', html: `${lineBullet(st.line, '★')}<span class="ns"><span class="lnm">${st.lineName} › </span><b>${esc(st.stop)}</b></span>` }),
           h('h3', {}, t.name),
           h('div', { class: 'meta' }, h('span', { class: 'stars' }, '★'.repeat(t.difficulty) + '☆'.repeat(3 - t.difficulty)), h('span', {}, `${t.laps} laps`)),
-          h('div', { class: 'meta' }, h('span', {}, `Best lap ${formatTime(rec?.bestLap)}`), h('span', {}, `Race ${formatTime(rec?.bestRace)}`))));
+          h('div', { class: 'meta' }, h('span', {}, `Lap ${formatTime(rec?.bestLap)}`), h('span', {}, `Race ${formatTime(rec?.bestRace)}`))));
       card.addEventListener('click', () => {
         this.trackId = t.id;
         this.save.updateSettings({ lastTrack: t.id });
@@ -448,8 +448,8 @@ export class Game {
     for (const cup of CUPS) {
       const best = this.save.data.cups[cup.id];
       const names = cup.tracks.map((id) => TRACKS.find((t) => t.id === id)?.name ?? id).join(' · ');
-      const frosty = /frost|snow|winter/i.test(cup.id + cup.name);
-      const b = this.ctaBtn(`${cup.name}${best ? `  ${best.bestPlace === 1 ? '🏆' : best.bestPlace <= 3 ? '🥈' : ''}` : ''}`, frosty ? 'blue' : 'red', frosty ? '❄️' : '🌬️', `${cup.tracks.length} stops`, '', () => {
+      const look: [CtaLine, string] = /frost|snow|winter/i.test(cup.id + cup.name) ? ['blue', '❄️'] : /sweet|home|blues/i.test(cup.id + cup.name) ? ['purple', '🎷'] : ['red', '🌬️'];
+      const b = this.ctaBtn(`${cup.name}${best ? `  ${best.bestPlace === 1 ? '🏆' : best.bestPlace <= 3 ? '🥈' : ''}` : ''}`, look[0], look[1], `${cup.tracks.length} stops`, '', () => {
         this.gp = { cup, race: 0, points: new Map(), lastResults: [] };
         this.showCharacterSelect(0);
       }, `cup-${cup.id}`);
@@ -483,7 +483,7 @@ export class Game {
     const bar = h('div');
     const [tipHead, tipText] = TIPS[Math.floor(Math.random() * TIPS.length)];
     const label = h('div', { class: 'tip' }, h('b', {}, `★ ${tipHead}`), tipText);
-    const st = stationFor(def.theme);
+    const st = stationFor(def.theme, def.id);
     const loading = h('div', { class: 'loading-screen', style: 'background-image:url(poster.jpg)' },
       h('div', { class: 'loading-box arrival', style: `--line:${CTA[st.line]}` },
         h('div', { class: 'arr-head', html: `${lineBullet(st.line, '★')}${st.lineName} · Now arriving` }),

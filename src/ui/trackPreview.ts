@@ -77,7 +77,7 @@ export function drawTrackPreview(canvas: HTMLCanvasElement, def: TrackDef): void
   g.lineWidth = 3;
   g.stroke();
   // CTA-style line bullet holding the theme icon
-  const line = CTA[stationFor(def.theme).line];
+  const line = CTA[stationFor(def.theme, def.id).line];
   g.beginPath();
   g.arc(30, 30, 22, 0, Math.PI * 2);
   g.fillStyle = line;

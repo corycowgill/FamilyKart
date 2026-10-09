@@ -65,8 +65,13 @@ const STATIONS: Record<TrackDef['theme'], TrackStation> = {
   snow: { line: 'blue', lineName: 'Blue Line', stop: 'Lake Effect' },
 };
 
-export function stationFor(theme: TrackDef['theme']): TrackStation {
-  return STATIONS[theme] ?? { line: 'purple', lineName: 'Purple Line', stop: 'Express' };
+/** Per-track overrides for tracks that share a theme. */
+const TRACK_STATIONS: Record<string, TrackStation> = {
+  sweethome: { line: 'purple', lineName: 'Purple Line', stop: 'Bronzeville' },
+};
+
+export function stationFor(theme: TrackDef['theme'], trackId?: string): TrackStation {
+  return (trackId && TRACK_STATIONS[trackId]) || STATIONS[theme] || { line: 'purple', lineName: 'Purple Line', stop: 'Express' };
 }
 
 /** Theatre-marquee bulb frame markup (decorative, CSS does the chasing lights). */
