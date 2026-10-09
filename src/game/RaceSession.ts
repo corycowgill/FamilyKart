@@ -98,7 +98,7 @@ export class RaceSession {
     await tick();
     onProgress(0.65, 'Fueling the karts…');
     for (const k of this.sim.karts) {
-      const v = new KartView(k, !k.isHuman && this.opts.mode !== 'attract');
+      const v = new KartView(k, !k.isHuman && this.opts.mode !== 'attract', q);
       this.kartViews.push(v);
       this.scene.add(v.root);
     }

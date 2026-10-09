@@ -3,6 +3,7 @@ import { characterById } from '../data/characters';
 import type { KartState } from '../sim/types';
 import { buildCharacter } from './models/characterModels';
 import { buildKart } from './models/kartModels';
+import { optimizeKartRig } from './models/optimize';
 import type { CharacterRig, KartRig } from './models/types';
 import { sprayColor, type Effects } from './Particles';
 
@@ -27,11 +28,20 @@ export class KartView {
   readonly interpPos = new THREE.Vector3();
   interpYaw = 0;
 
-  constructor(private state: KartState, showLabel: boolean) {
+  constructor(private state: KartState, showLabel: boolean, quality: 'low' | 'medium' | 'high' = 'high') {
     const def = characterById(state.character);
     this.kart = buildKart(def);
     this.character = buildCharacter(state.character);
     this.kart.seat.add(this.character.root);
+    // ~130 meshes per racer -> merge everything that never moves (big draw-call saving with 6 karts)
+    optimizeKartRig(this.kart, this.character);
+    // real shadows only from the bigger parts on high; below that the soft blob shadow does the job
+    this.kart.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+      m.castShadow = m.castShadow && quality === 'high' && (m.geometry.boundingSphere?.radius ?? 0) > 0.3;
+    });
     this.root.add(this.kart.root);
 
     const shieldMat = new THREE.MeshPhysicalMaterial({
