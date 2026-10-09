@@ -41,7 +41,7 @@ import { FACE, type Expression, type FaceStyle, bandanaTexture, eyeAngles, faceT
 // Specs
 // ---------------------------------------------------------------------------------------------
 
-type HairStyle = 'dad' | 'mom' | 'brennan' | 'parker' | 'grandma';
+type HairStyle = 'dad' | 'mom' | 'bro1' | 'bro2' | 'grandma';
 
 interface HumanSpec {
   torsoH: number;
@@ -86,18 +86,18 @@ const SPECS: Record<Exclude<CharacterId, 'lupin'>, HumanSpec> = {
     face: { ...baseFace, skin: '#f4c09e', iris: '#5d7a3a', brow: '#6a4428', lip: '#c4566a', blush: 0.85, eyeR: 0.15, eyeSep: 0.3, mouthW: 0.56, browThick: 10, lashes: true },
     wheelY: 0.3,
   },
-  brennan: {
+  bro1: {
     torsoH: 0.36, torsoR: 0.18, sx: 1.16, headR: 0.285, headScale: [1, 0.98, 0.97], neck: 0.05,
     armL1: 0.22, armL2: 0.22, armR: 0.062, handR: 0.078, legR: 0.07,
-    skin: '#f3bf98', glove: '#151515', cuff: '#d81e1e', hair: 'brennan', hairColor: '#6a4024', hairColor2: '#865430',
+    skin: '#f3bf98', glove: '#151515', cuff: '#d81e1e', hair: 'bro1', hairColor: '#6a4024', hairColor2: '#865430',
     nose: 0.115,
     face: { ...baseFace, skin: '#f3bf98', iris: '#6b4a2a', brow: '#5a3820', lip: '#b5545a', eyeR: 0.165, eyeSep: 0.31, mouthW: 0.5, browThick: 11 },
     wheelY: 0.27,
   },
-  parker: {
+  bro2: {
     torsoH: 0.33, torsoR: 0.17, sx: 1.14, headR: 0.285, headScale: [1.02, 0.97, 0.97], neck: 0.045,
     armL1: 0.21, armL2: 0.21, armR: 0.06, handR: 0.076, legR: 0.068,
-    skin: '#f6c5a2', glove: '#151515', cuff: '#ffd21f', hair: 'parker', hairColor: '#ddb258', hairColor2: '#f4da8e',
+    skin: '#f6c5a2', glove: '#151515', cuff: '#ffd21f', hair: 'bro2', hairColor: '#ddb258', hairColor2: '#f4da8e',
     nose: 0.11,
     face: { ...baseFace, skin: '#f6c5a2', iris: '#3b86c9', brow: '#b98a3c', lip: '#b8565c', eyeR: 0.17, eyeSep: 0.31, mouthW: 0.52, browThick: 10, freckles: true },
     wheelY: 0.26,
@@ -112,7 +112,7 @@ const SPECS: Record<Exclude<CharacterId, 'lupin'>, HumanSpec> = {
   },
 };
 
-const CHAR_SCALE: Record<CharacterId, number> = { dad: 1.2, mom: 1.18, brennan: 1.2, parker: 1.2, lupin: 1.22, grandma: 1.18 };
+const CHAR_SCALE: Record<CharacterId, number> = { dad: 1.2, mom: 1.18, bro1: 1.2, bro2: 1.2, lupin: 1.22, grandma: 1.18 };
 
 const WHEEL_Z = 0.4;
 const WHEEL_R = 0.15;
@@ -529,7 +529,7 @@ function buildHair(head: THREE.Group, sp: HumanSpec, rig: Partial<Rig>): void {
       rig.ponytail = pivot;
       break;
     }
-    case 'brennan': {
+    case 'bro1': {
       cap(1.45, 0.5, 1.05);
       const strands: Strand[] = [];
       const up = new THREE.Vector3(0, 1, 0.35);
@@ -542,7 +542,7 @@ function buildHair(head: THREE.Group, sp: HumanSpec, rig: Partial<Rig>): void {
       head.add(shaggy(strands, rnd, 8));
       break;
     }
-    case 'parker': {
+    case 'bro2': {
       cap(1.5, 0.45, 1.05);
       // messy, wind-swept blond hair
       const strands: Strand[] = [];
@@ -1269,7 +1269,7 @@ export function buildCharacter(id: CharacterId): CharacterRig {
   rig.root.name += ':scaled';
   rig.root.scale.setScalar(CHAR_SCALE[id]);
   outer.add(rig.root);
-  const rndSeed = { dad: 1, mom: 2, brennan: 3, parker: 4, lupin: 5, grandma: 6 }[id] * 7919 + Math.floor(Math.random() * 1000);
+  const rndSeed = { dad: 1, mom: 2, bro1: 3, bro2: 4, lupin: 5, grandma: 6 }[id] * 7919 + Math.floor(Math.random() * 1000);
   const rnd = seeded(rndSeed);
   const st: AnimState = {
     steer: 0, drift: 0, boost: 0, accel: 0, prevSpeed: 0, reaction: 'none', age: 0,

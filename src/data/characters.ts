@@ -31,14 +31,14 @@ export const CHARACTERS: CharacterDef[] = [
     emblem: 'heart', enginePitch: 1.05, ai: { aggression: 0.5, risk: 0.3, drift: 0.8 },
   },
   {
-    id: 'brennan', name: 'Brennan', title: 'The Technician', tagline: 'Focused, strategic, and loves a clean overtake.',
+    id: 'bro1', name: 'Bro 1', title: 'The Technician', tagline: 'Focused, strategic, and loves a clean overtake.',
     stats: { speed: 4, acceleration: 3, handling: 5, weight: 2 },
     special: { id: 'turboDrift', name: 'Turbo Drift', description: 'Drift boosts charge faster and hit harder for a while.', cooldown: 12 },
     colors: { primary: '#d81e1e', secondary: '#151515', accent: '#ffffff', suit: '#161616', suitAccent: '#d81e1e' },
     emblem: 'soccer', enginePitch: 1.1, ai: { aggression: 0.6, risk: 0.6, drift: 1 },
   },
   {
-    id: 'parker', name: 'Parker', title: 'The Wildcard', tagline: 'Playful, fearless, and always taking the risky shortcut.',
+    id: 'bro2', name: 'Bro 2', title: 'The Wildcard', tagline: 'Playful, fearless, and always taking the risky shortcut.',
     stats: { speed: 4, acceleration: 5, handling: 3, weight: 2 },
     special: { id: 'lightningDash', name: 'Lightning Dash', description: 'A sudden burst that bumps nearby racers aside.', cooldown: 36 },
     colors: { primary: '#5cc72e', secondary: '#151515', accent: '#ffd21f', suit: '#1f5fd1', suitAccent: '#ffd21f' },

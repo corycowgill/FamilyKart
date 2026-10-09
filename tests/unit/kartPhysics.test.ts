@@ -85,7 +85,7 @@ describe('longitudinal dynamics', () => {
 
   it('reverses up to reverseSpeed', () => {
     const track = flatPlane();
-    const k = makeKart('parker');
+    const k = makeKart('bro2');
     drive(k, track, 5, input({ throttle: -1 }));
     expect(k.forwardSpeed).toBeLessThan(-k.tuning.reverseSpeed * 0.95);
     expect(k.forwardSpeed).toBeGreaterThanOrEqual(-k.tuning.reverseSpeed - 1e-6);
@@ -97,7 +97,7 @@ describe('steering', () => {
   it('steer +1 turns right, steer -1 turns left', () => {
     const track = flatPlane();
     for (const steer of [1, -1]) {
-      const k = makeKart('brennan');
+      const k = makeKart('bro1');
       drive(k, track, 2, input({ throttle: 1 }));
       const x0 = k.pos.x;
       const yaw0 = k.yaw;
@@ -112,7 +112,7 @@ describe('steering', () => {
   });
 
   it('does not rotate when stationary', () => {
-    const k = makeKart('brennan');
+    const k = makeKart('bro1');
     drive(k, flatPlane(), 1, input({ steer: 1 }));
     expect(k.yaw).toBeCloseTo(0, 5);
   });
@@ -130,7 +130,7 @@ describe('drifting', () => {
   it('hop -> drift -> charge -> tiers -> release boost (drift1/2/3)', () => {
     for (const [holdSeconds, expectedTier] of [[0.9, 1], [1.6, 2], [3.0, 3]] as const) {
       const track = flatPlane();
-      const k = makeKart('brennan');
+      const k = makeKart('bro1');
       drive(k, track, 3, input({ throttle: 1 }));
       const events: SimEvent[] = [];
       let prev = false;
@@ -166,7 +166,7 @@ describe('drifting', () => {
 
   it('releasing a drift before tier 1 gives no boost', () => {
     const track = flatPlane();
-    const k = makeKart('brennan');
+    const k = makeKart('bro1');
     drive(k, track, 3, input({ throttle: 1 }));
     drive(k, track, 0.5, input({ throttle: 1, steer: 1, drift: true }));
     expect(k.drift.active).toBe(true);
@@ -178,7 +178,7 @@ describe('drifting', () => {
 
   it('hop without steering does not start a drift', () => {
     const track = flatPlane();
-    const k = makeKart('brennan');
+    const k = makeKart('bro1');
     drive(k, track, 3, input({ throttle: 1 }));
     drive(k, track, 0.6, input({ throttle: 1, drift: true }));
     expect(k.drift.active).toBe(false);

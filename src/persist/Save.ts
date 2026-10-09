@@ -49,7 +49,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lastCharacter: 'dad', lastCharacterP2: 'mom', lastTrack: 'chicago',
 };
 
-const KEY = 'cowgill-kart-save-v1';
+const KEY = 'family-kart-save-v1';
 
 export interface StorageLike {
   getItem(k: string): string | null;

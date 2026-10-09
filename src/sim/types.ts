@@ -4,7 +4,7 @@
  */
 import type { Vec3 } from '../core/math';
 
-export type CharacterId = 'dad' | 'mom' | 'brennan' | 'parker' | 'lupin' | 'grandma';
+export type CharacterId = 'dad' | 'mom' | 'bro1' | 'bro2' | 'lupin' | 'grandma';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type TrackTheme = 'chicago' | 'neighborhood' | 'kitchen' | 'dogpark' | 'snow';
 export type SurfaceType = 'road' | 'offroad' | 'ice' | 'mud' | 'milk';

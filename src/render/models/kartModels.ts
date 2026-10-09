@@ -87,10 +87,10 @@ function styleFor(def: CharacterDef): KartStyle {
       len: 1.08, bodyW: 0.96, noseY: 0.36, dashY: 0.62, round: 0.24, podTop: 0.5,
       pod: c.secondary, trim: '#ffffff', seat: '#4d1f6b', rim: '#ffffff', hub: c.primary, spoiler: 'lip', bumper: 'round', fenders: 'front',
     },
-    brennan: {
+    bro1: {
       bodyW: 0.9, noseY: 0.34, round: 0.1, pod: '#161616', trim: '#ffffff', rim: '#1d1d1d', hub: c.primary, spoiler: 'wing', bumper: 'bar',
     },
-    parker: {
+    bro2: {
       len: 1.16, rear: -0.95, bodyW: 0.78, noseY: 0.29, dashY: 0.58, round: 0.05, podW: 0.2, podTop: 0.46,
       wf: { r: 0.25, w: 0.24, x: 0.64, z: 0.78 }, wr: { r: 0.3, w: 0.32, x: 0.68, z: -0.72 },
       pod: '#151515', trim: c.accent, rim: c.accent, hub: '#151515', spoiler: 'fin', bumper: 'blade',

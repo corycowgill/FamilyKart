@@ -17,7 +17,7 @@ this pass, measured the same way. Expect about ±4 percentage points of noise on
 | metric | baseline | now | target |
 | --- | --- | --- | --- |
 | race completion | 100% (Chicago only)\* | **100%** | 100% |
-| highest win rate | parker 43–49% | **dad 27.3%** | ≤ ~28% |
+| highest win rate | bro2 43–49% | **dad 27.3%** | ≤ ~28% |
 | lowest win rate | grandma 0.8–3% | **mom 8.7%** | ≥ ~8% |
 | avg winning time | 2:42 (Chicago) | 2:55 | 3–5 min |
 | avg race end (last finisher) | 3:04 (Chicago) | 3:14 | 3–5 min |
@@ -33,19 +33,19 @@ single kart was stuck for minutes.
 | character | stats (spd/acc/hnd/wt) | special (cooldown) | win % | podium % | avg pos | baseline win % |
 | --- | --- | --- | --- | --- | --- | --- |
 | Dad | 4/3/3/4 | Dad Boost (36 s) | 27.3 | 62.7 | 3.0 | 39 |
-| Parker | 4/5/3/2 | Lightning Dash (36 s) | 22.7 | 63.3 | 3.0 | 43 |
+| Bro 2 | 4/5/3/2 | Lightning Dash (36 s) | 22.7 | 63.3 | 3.0 | 43 |
 | Lupin | 3/5/4/1 | Puppy Panic (10 s) | 19.3 | 53.3 | 3.3 | 3 |
 | Grandma | 3/3/4/3 | Grandma's Revenge (26 s) | 11.3 | 40.0 | 3.9 | 3 |
-| Brennan | 4/3/5/2 | Turbo Drift (12 s) | 10.7 | 41.3 | 3.7 | 12 |
+| Bro 1 | 4/3/5/2 | Turbo Drift (12 s) | 10.7 | 41.3 | 3.7 | 12 |
 | Mom | 3/4/4/2 | Mom Shield (10 s) | 8.7 | 39.3 | 4.0 | 2 |
 
 The baseline column comes from the same rotation of all tracks and difficulties: 120 races, measured just before
-the tuning change. On Chicago only, the baseline was parker 49%, dad 33%, brennan 11%, lupin 4%, mom 1.7% and
+the tuning change. On Chicago only, the baseline was bro2 49%, dad 33%, bro1 11%, lupin 4%, mom 1.7% and
 grandma 0.8%.
 
-**No character dominates any more.** Dad and Parker are still the strongest overall, by about 1 position on average,
+**No character dominates any more.** Dad and Bro 2 are still the strongest overall, by about 1 position on average,
 but neither is above the ~28% ceiling. The spread varies by track and difficulty (see the harness output): for
-example, Dad wins 40% on dogpark and 38% on easy. Mom on easy and Brennan on neighborhood/dogpark are the weakest
+example, Dad wins 40% on dogpark and 38% on easy. Mom on easy and Bro 1 on neighborhood/dogpark are the weakest
 cells. Each cell is only 30–50 races, so read them as directional.
 
 ### Why the baseline was lopsided
@@ -54,12 +54,12 @@ The tuning was isolated with an experiment that equalised stats and/or disabled 
 
 1. **The speed stat dominated.** Top speed was `26 + 1.0 × speed`, so a 4-star kart was 3.4% faster than a
    3-star kart. AI racers drive nearly identical lines, so that gap is about 5 s per race. With specials disabled,
-   the 4-speed karts (Dad, Brennan, Parker) won about 31% each and the 3-speed karts about 2%.
+   the 4-speed karts (Dad, Bro 1, Bro 2) won about 31% each and the 3-speed karts about 2%.
 2. **Handling is worth almost nothing to the AI.** `AIDriver` plans corner speed from `AI_DIFFICULTY.cornerGrip`,
    not from the kart's handling. The corners are wide enough that the AI rarely corners at the limit. Making AI
    corner speed scale with handling was tried, and it made no measurable difference.
 3. **Two specials were overpowered.** With all stats equal, Dad Boost alone took Dad to a 52% win rate (2 s at
-   +48% every 22 s, fired on every straight). Lightning Dash took Parker to 53% (+60% burst plus a shove that
+   +48% every 22 s, fired on every straight). Lightning Dash took Bro 2 to 53% (+60% burst plus a shove that
    costs nearby rivals 25% of their speed). Grandma's pie was also strong (+22% win rate). Mom's shield, Turbo Drift
    and Puppy Panic were each worth only a few percent.
 
@@ -87,7 +87,7 @@ The tuning was isolated with an experiment that equalised stats and/or disabled 
   Increasing the release tolerance in `AIDriver` raised the boost rate to about 12% but did not shorten lap
   times, so I did not ship it.
 * Visible effect: AI karts bunny-hop constantly (about 195 jumps per race in total, including ramps).
-* Turbo Drift is mostly wasted on AI Brennan, which is part of why his special cooldown is now short.
+* Turbo Drift is mostly wasted on AI Bro 1, which is part of why his special cooldown is now short.
 
 **Recommendation (AIDriver):** only start a drift when the curvature ahead is above about 0.03 and lasts at least
 1 s at the current speed. While drifting, steer to hold the racing line using the drift-tightness range: steer = 0
@@ -161,7 +161,7 @@ Each sim change is listed with its before and after values.
 
 ## Further tuning recommendations
 
-1. **Mom (8.7%) and Brennan (10.7%) are still at the bottom.** They need value from their specials, not shorter
+1. **Mom (8.7%) and Bro 1 (10.7%) are still at the bottom.** They need value from their specials, not shorter
    cooldowns:
    * Make the AI fire Mom Shield when any projectile is in flight or a hazard is ahead within 30 m, not only when
      she is in the top 2. Alternatively, give the shield a small (+10%, 0.5 s) launch boost.

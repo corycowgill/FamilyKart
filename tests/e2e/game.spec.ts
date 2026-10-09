@@ -5,7 +5,7 @@ const state = (page: Page) => page.evaluate(() => (window as unknown as GameWin)
 const waitScreen = (page: Page, screen: string, timeout = 120_000) =>
   page.waitForFunction((s) => (window as unknown as GameWin).__game?.state.screen === s, screen, { timeout, polling: 250 });
 
-test.describe('Cowgill Kart Racing', () => {
+test.describe('Family Kart Racing', () => {
   let errors: string[];
   test.beforeEach(async ({ page }) => {
     errors = [];
@@ -23,7 +23,7 @@ test.describe('Cowgill Kart Racing', () => {
     await page.click('[data-testid=btn-quick-race]');
     await waitScreen(page, 'character');
     // all six family members are selectable
-    for (const id of ['dad', 'mom', 'brennan', 'parker', 'lupin', 'grandma']) await expect(page.locator(`[data-testid=char-${id}]`)).toBeVisible();
+    for (const id of ['dad', 'mom', 'bro1', 'bro2', 'lupin', 'grandma']) await expect(page.locator(`[data-testid=char-${id}]`)).toBeVisible();
     await page.click('[data-testid=char-grandma]');
     await expect(page.locator('.char-info h2')).toHaveText('Grandma');
     await page.click('[data-testid=btn-confirm-character]');
@@ -91,7 +91,7 @@ test.describe('Cowgill Kart Racing', () => {
     await page.click('[data-testid=btn-settings-done]');
     await page.reload();
     await waitScreen(page, 'title');
-    const music = await page.evaluate(() => JSON.parse(localStorage.getItem('cowgill-kart-save-v1') ?? '{}').settings?.music);
+    const music = await page.evaluate(() => JSON.parse(localStorage.getItem('family-kart-save-v1') ?? '{}').settings?.music);
     expect(music).toBeCloseTo(0.2);
   });
 });

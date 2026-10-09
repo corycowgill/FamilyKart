@@ -642,7 +642,7 @@ export function suitTexture(id: CharacterId, suit: string, accent: string): THRE
         drawEmblem(ctx, 'heart', cx + 52, 96, 16, { fill: accent, outline: '#ffffff' });
         break;
       }
-      case 'brennan': {
+      case 'bro1': {
         ctx.fillStyle = accent;
         for (const s of [-1, 1]) {
           ctx.fillRect(cx + s * 92 - 16, 0, 32, h);
@@ -659,7 +659,7 @@ export function suitTexture(id: CharacterId, suit: string, accent: string): THRE
         ctx.fillText('10', cx - 34, 108);
         break;
       }
-      case 'parker': {
+      case 'bro2': {
         ctx.fillStyle = accent;
         for (const s of [-1, 1]) {
           ctx.fillRect(cx + s * 100 - 9, 0, 18, h);
@@ -884,7 +884,7 @@ export function hoodTexture(id: CharacterId, kind: EmblemKind, colors: { primary
         for (const s of [-1, 1]) ctx.fillRect(cx + s * 92 - 2, 0, 4, h);
         drawEmblem(ctx, 'x', cx, cy, 70, { fill: '#ffffff', outline: '#0b1d55' });
         break;
-      case 'parker':
+      case 'bro2':
         ctx.fillStyle = '#151515';
         ctx.beginPath();
         ctx.moveTo(cx - 70, 0);
@@ -895,7 +895,7 @@ export function hoodTexture(id: CharacterId, kind: EmblemKind, colors: { primary
         ctx.fill();
         drawEmblem(ctx, 'bolt', cx, cy, 78, { fill: '#ffd21f', outline: '#151515' });
         break;
-      case 'brennan':
+      case 'bro1':
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.arc(cx, cy, 86, 0, Math.PI * 2);
@@ -917,14 +917,14 @@ export function hoodTexture(id: CharacterId, kind: EmblemKind, colors: { primary
   });
 }
 
-const INITIAL: Record<CharacterId, string> = { dad: 'D', mom: 'M', brennan: 'B', parker: 'P', lupin: 'L', grandma: 'G' };
+const INITIAL: Record<CharacterId, string> = { dad: 'D', mom: 'M', bro1: '1', bro2: '2', lupin: 'L', grandma: 'G' };
 
 /** Side decal (wide, transparent): swoosh stripe, emblem and racer initial. */
 export function sideTexture(id: CharacterId, kind: EmblemKind, colors: { primary: string; secondary: string; accent: string }): THREE.Texture | null {
   return canvasTex(`side:${id}`, 512, 160, (ctx, w, h) => {
     ctx.clearRect(0, 0, w, h);
     // swoosh stripes
-    const stripe = id === 'dad' || id === 'brennan' ? '#ffffff' : colors.accent;
+    const stripe = id === 'dad' || id === 'bro1' ? '#ffffff' : colors.accent;
     ctx.fillStyle = stripe;
     ctx.beginPath();
     ctx.moveTo(0, h * 0.62);
@@ -953,7 +953,7 @@ export function sideTexture(id: CharacterId, kind: EmblemKind, colors: { primary
     ctx.lineWidth = 7;
     ctx.strokeStyle = '#151515';
     ctx.stroke();
-    if (id === 'grandma' || id === 'lupin' || id === 'brennan' || id === 'mom') {
+    if (id === 'grandma' || id === 'lupin' || id === 'bro1' || id === 'mom') {
       drawEmblem(ctx, kind, rx, ry + (kind === 'heart' ? 4 : 0), 34, { fill: kind === 'heart' ? colors.primary : undefined, outline: kind === 'heart' ? '#ffffff' : undefined, petals: '#ffffff', center: '#ffd23f' });
       if (kind === 'flower') {
         ctx.beginPath();
@@ -974,10 +974,10 @@ export function sideTexture(id: CharacterId, kind: EmblemKind, colors: { primary
     } else if (id === 'lupin') {
       drawEmblem(ctx, 'paw', w * 0.18, h * 0.4, 22, { fill: '#2a2a2a' });
       drawEmblem(ctx, 'paw', w * 0.82, h * 0.3, 18, { fill: '#2a2a2a' });
-    } else if (id === 'parker') {
+    } else if (id === 'bro2') {
       drawEmblem(ctx, 'bolt', w * 0.2, h * 0.4, 30, { fill: '#ffd21f', outline: '#151515' });
       drawEmblem(ctx, 'bolt', w * 0.82, h * 0.3, 26, { fill: '#ffd21f', outline: '#151515' });
-    } else if (id === 'brennan') {
+    } else if (id === 'bro1') {
       drawEmblem(ctx, 'soccer', w * 0.18, h * 0.42, 22, {});
     } else if (id === 'mom') {
       drawEmblem(ctx, 'heart', w * 0.18, h * 0.42, 20, { fill: '#ff8fd0', outline: '#ffffff' });

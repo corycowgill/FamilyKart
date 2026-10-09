@@ -85,14 +85,14 @@ describe('Save persistence', () => {
 
   it('recovers from corrupt JSON', () => {
     const store = new FakeStorage();
-    store.m.set('cowgill-kart-save-v1', '{not json');
+    store.m.set('family-kart-save-v1', '{not json');
     const s = new Save(store);
     expect(s.settings).toEqual(DEFAULT_SETTINGS);
   });
 
   it('merges partial / older saves with defaults', () => {
     const store = new FakeStorage();
-    store.m.set('cowgill-kart-save-v1', JSON.stringify({ settings: { music: 0.2 }, totals: { races: 4 } }));
+    store.m.set('family-kart-save-v1', JSON.stringify({ settings: { music: 0.2 }, totals: { races: 4 } }));
     const s = new Save(store);
     expect(s.settings.music).toBe(0.2);
     expect(s.settings.quality).toBe(DEFAULT_SETTINGS.quality);

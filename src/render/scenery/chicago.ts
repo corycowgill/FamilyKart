@@ -599,7 +599,7 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
   {
     const boards = [
       textTexture('DEEP DISH PIZZA', { w: 1024, h: 256, bg: '#ffd23f', fg: '#c62828', border: '#c62828' }),
-      textTexture('GO COWGILLS!', { w: 1024, h: 256, bg: '#1f4fbf', fg: '#ffffff', border: '#ffd23f' }),
+      textTexture('GO TEAM FAMILY!', { w: 1024, h: 256, bg: '#1f4fbf', fg: '#ffffff', border: '#ffd23f' }),
       textTexture('CHICAGO-STYLE HOT DOGS', { w: 1024, h: 256, bg: '#3ccf6e', fg: '#ffffff', border: '#ffd23f', font: '900 104px "Arial Black", Impact, sans-serif' }),
       textTexture('WINDY CITY GP', { w: 1024, h: 256, bg: '#d7262e', fg: '#ffffff', border: '#ffffff' }),
     ].map((t) => bag.add(t));

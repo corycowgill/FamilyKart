@@ -1,7 +1,7 @@
 # Render.com Blueprint: static site, no backend required.
 services:
   - type: web
-    name: cowgill-kart-racing
+    name: family-kart-racing
     runtime: static
     buildCommand: npm ci && npm run build
     staticPublishPath: ./dist

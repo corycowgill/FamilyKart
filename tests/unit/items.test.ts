@@ -273,7 +273,7 @@ describe('defense & fairness', () => {
   });
 
   it('back-to-back bananas only hit once', () => {
-    const sim = setup(['dad', 'mom', 'parker']);
+    const sim = setup(['dad', 'mom', 'bro2']);
     const [a, b, c] = sim.karts;
     placeInSim(sim, a, 80, 0);
     placeInSim(sim, c, 85, 0);
@@ -345,7 +345,7 @@ describe('specials', () => {
 
   it('turboDrift: drift charges faster and boosts harder', () => {
     const charge = (useIt: boolean) => {
-      const { sim, k } = special('brennan');
+      const { sim, k } = special('bro1');
       placeInSim(sim, k, 20, 0, 25);
       if (useIt) sim.items.useSpecial(k);
       let maxCharge = 0;
@@ -367,7 +367,7 @@ describe('specials', () => {
   });
 
   it('lightningDash: boost and pushes nearby racers aside', () => {
-    const { sim, k } = special('parker');
+    const { sim, k } = special('bro2');
     const o = sim.karts[1];
     placeInSim(sim, k, 40, 0, 10);
     placeInSim(sim, o, 40, 3.5, 10);

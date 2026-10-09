@@ -34,7 +34,7 @@ test('touch screen: tap through menus and race with on-screen controls', async (
   await waitScreen(page, 'menu');
   await page.tap('[data-testid=btn-quick-race]');
   await waitScreen(page, 'character');
-  await page.tap('[data-testid=char-parker]');
+  await page.tap('[data-testid=char-bro2]');
   await page.tap('[data-testid=btn-confirm-character]');
   await waitScreen(page, 'track');
   await page.tap('[data-testid=track-chicago]');
@@ -75,7 +75,7 @@ test('touch screen: tap through menus and race with on-screen controls', async (
 
 test('touch options: left-handed layout and manual gas', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('cowgill-kart-save-v1', JSON.stringify({ version: 1, settings: { touch: { autoGas: false, tilt: false, size: 'l', leftHanded: true } } }));
+    localStorage.setItem('family-kart-save-v1', JSON.stringify({ version: 1, settings: { touch: { autoGas: false, tilt: false, size: 'l', leftHanded: true } } }));
   });
   await page.goto('/?nointro&laps=1');
   await waitScreen(page, 'title');

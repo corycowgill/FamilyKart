@@ -1,7 +1,7 @@
 {
-  "name": "Cowgill Kart Racing",
-  "short_name": "Cowgill Kart",
-  "description": "A colorful family kart racing game starring Dad, Mom, Brennan, Parker, Lupin and Grandma.",
+  "name": "Family Kart Racing",
+  "short_name": "Family Kart",
+  "description": "A colorful family kart racing game starring Dad, Mom, Bro 1, Bro 2, Lupin and Grandma.",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

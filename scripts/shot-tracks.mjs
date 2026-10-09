@@ -11,7 +11,7 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 const screen = (s) => page.waitForFunction((x) => window.__game?.state.screen === x, s, { timeout: 180000, polling: 250 });
 await page.goto(base + '?laps=1&autopilot');
 await screen('title');
-const chars = ['dad', 'mom', 'brennan', 'parker', 'lupin', 'grandma'];
+const chars = ['dad', 'mom', 'bro1', 'bro2', 'lupin', 'grandma'];
 for (const [i, t] of ['chicago', 'neighborhood', 'kitchen', 'dogpark', 'snow'].entries()) {
   await page.evaluate(() => { const g = window.__game; g.showMainMenu(); });
   await screen('menu');

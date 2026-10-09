@@ -1,5 +1,5 @@
 /**
- * Procedural Web Audio engine for Cowgill Kart Racing.
+ * Procedural Web Audio engine for Family Kart Racing.
  *
  * Every sound is synthesized at runtime (oscillators, noise, filters, envelopes, FM);
  * there are no audio files. The engine is a safe no-op until `init()` succeeds (which

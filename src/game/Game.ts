@@ -28,7 +28,7 @@ const TIPS = [
   'Lupin drops tennis balls behind him. Do not chase the tennis balls.',
   'Racers further back get stronger items — never give up!',
   'Each family member has a signature special — press F when the meter is READY.',
-  'Look for hidden shortcuts. Parker always does.',
+  'Look for hidden shortcuts. Bro 2 always does.',
   'A Bubble Shield blocks one attack. Mom never leaves home without one.',
   'Drive through boost pads for a free burst of speed.',
 ];
@@ -74,7 +74,7 @@ export class Game {
     this.input = new Input(window);
     const s = this.save.settings;
     this.difficulty = s.difficulty;
-    this.players = [s.lastCharacter];
+    this.players = [CHARACTERS.some((c) => c.id === s.lastCharacter) ? s.lastCharacter : 'dad'];
     this.trackId = TRACKS.some((t) => t.id === s.lastTrack) ? s.lastTrack : TRACKS[0].id;
     // phones and tablets start on medium graphics unless the player picked a quality themselves
     if (isTouchDevice() && !s.qualityChosen && s.quality === 'high' && !window.matchMedia?.('(any-pointer: fine)').matches) this.save.updateSettings({ quality: 'medium' });
@@ -221,9 +221,9 @@ export class Game {
     this.setStage(null);
     const el = h('div', { class: 'title-screen' },
       h('div', { class: 'vignette' }),
-      h('div', { class: 'logo', html: '<span class="l1">COWGILL</span><span class="l2"><span class="flag">🏁</span> KART RACING <span class="flag">🏁</span></span>' }),
+      h('div', { class: 'logo', html: '<span class="l1">FAMILY</span><span class="l2"><span class="flag">🏁</span> KART RACING <span class="flag">🏁</span></span>' }),
       h('div', { class: 'press-start' }, '', h('span', { class: 'kb-only' }, 'Press any key or click to start'), h('span', { class: 'pad-only' }, 'Press Ⓐ to start'), h('span', { class: 'touch-only' }, 'Tap to start')),
-      h('div', { class: 'footer-hint' }, 'Dad · Mom · Brennan · Parker · Lupin · Grandma'),
+      h('div', { class: 'footer-hint' }, 'Dad · Mom · Bro 1 · Bro 2 · Lupin · Grandma'),
     );
     const go = (e?: Event) => {
       this.titleGo = null;
@@ -247,7 +247,7 @@ export class Game {
     const t = this.save.data.totals;
     const el = h('div', { class: 'title-screen' },
       h('div', { class: 'vignette' }),
-      h('div', { class: 'logo', html: '<span class="l1">COWGILL</span><span class="l2"><span class="flag">🏁</span> KART RACING <span class="flag">🏁</span></span>' }),
+      h('div', { class: 'logo', html: '<span class="l1">FAMILY</span><span class="l2"><span class="flag">🏁</span> KART RACING <span class="flag">🏁</span></span>' }),
       h('div', { class: 'menu-list' },
         this.btn('Quick Race', '', () => this.beginMode('quick'), 'btn-quick-race'),
         this.btn('Grand Prix', 'yellow', () => this.beginMode('grandprix'), 'btn-grand-prix'),
@@ -278,7 +278,8 @@ export class Game {
     const room = new Showroom(this.renderer);
     this.stopAttract();
     this.setStage(room);
-    let current: CharacterId = playerSlot === 0 ? this.players[0] : (this.save.settings.lastCharacterP2 !== this.players[0] ? this.save.settings.lastCharacterP2 : CHARACTERS.find((c) => c.id !== this.players[0])!.id);
+    const p2 = this.save.settings.lastCharacterP2;
+    let current: CharacterId = playerSlot === 0 ? this.players[0] : (p2 !== this.players[0] && CHARACTERS.some((c) => c.id === p2) ? p2 : CHARACTERS.find((c) => c.id !== this.players[0])!.id);
     const info = h('div', { class: 'char-info panel' });
     const cards = h('div', { class: 'char-cards' });
     const refresh = () => {

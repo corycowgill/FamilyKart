@@ -7,7 +7,7 @@ import { RaceSim } from '../src/sim/race/RaceSim';
 import { Track } from '../src/sim/track/Track';
 import type { CharacterId, Difficulty, TrackDef } from '../src/sim/types';
 
-const RACERS: CharacterId[] = ['dad', 'mom', 'brennan', 'parker', 'lupin', 'grandma'];
+const RACERS: CharacterId[] = ['dad', 'mom', 'bro1', 'bro2', 'lupin', 'grandma'];
 const RUNS: Array<{ difficulty: Difficulty; seed: number }> = [
   { difficulty: 'normal', seed: 11 },
   { difficulty: 'hard', seed: 222 },

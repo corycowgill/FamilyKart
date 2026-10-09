@@ -9,7 +9,7 @@ const bar = loader.querySelector<HTMLElement>('.boot-bar div')!;
 function fail(err: unknown): void {
   console.error(err);
   loader.classList.remove('hidden');
-  loader.innerHTML = `<div class="boot-logo">Oops!</div><div style="max-width:560px;text-align:center;font-size:18px">Cowgill Kart Racing needs a browser with WebGL2 support. ${err instanceof Error ? err.message : ''}</div>`;
+  loader.innerHTML = `<div class="boot-logo">Oops!</div><div style="max-width:560px;text-align:center;font-size:18px">Family Kart Racing needs a browser with WebGL2 support. ${err instanceof Error ? err.message : ''}</div>`;
 }
 
 async function boot(): Promise<void> {

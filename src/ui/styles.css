@@ -389,3 +389,11 @@ body.touch-mode .settings input[type=range] { height: 28px; }
   .btn:active, .char-card:active, .track-card:active { transform: none; filter: brightness(1.2); }
   .btn.tapped, .char-card.tapped, .track-card.tapped { filter: brightness(1.25); }
 }
+/* laptop-height screens: keep the character info panel clear of the racer cards */
+@media (min-height: 521px) and (max-height: 860px) {
+  .char-info { top: 12vh; padding: 12px 16px; }
+  .char-info h2 { font-size: 40px; }
+  .char-info .tag { display: none; }
+  .stat { margin: 3px 0; font-size: 14px; }
+  .special-box { margin-top: 8px; padding: 8px 10px; font-size: 13px; }
+}

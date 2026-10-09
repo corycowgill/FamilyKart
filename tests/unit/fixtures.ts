@@ -9,7 +9,7 @@ import { RaceSim, type RaceConfig } from '../../src/sim/race/RaceSim';
 import { Track, type TrackQuery, type TrackSample } from '../../src/sim/track/Track';
 import type { CharacterId, KartInput, KartState, TrackDef, TrackPoint } from '../../src/sim/types';
 
-export const ALL_CHARACTERS: CharacterId[] = ['dad', 'mom', 'brennan', 'parker', 'lupin', 'grandma'];
+export const ALL_CHARACTERS: CharacterId[] = ['dad', 'mom', 'bro1', 'bro2', 'lupin', 'grandma'];
 
 /** Build a complete TrackDef with sensible empty defaults. */
 export function makeTrackDef(id: string, points: TrackPoint[], extra: Partial<TrackDef> = {}): TrackDef {

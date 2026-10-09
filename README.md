@@ -1,7 +1,7 @@
-# 🏁 Cowgill Kart Racing
+# 🏁 Family Kart Racing
 
 A colorful, chaotic, family-themed 3D arcade kart racer that runs in the browser.
-Dad, Mom, Brennan, Parker, Lupin (the fluffy Tibetan Terrier) and Grandma race each other through Chicago,
+Dad, Mom, Bro 1, Bro 2, Lupin (the fluffy Tibetan Terrier) and Grandma race each other through Chicago,
 their neighborhood, a giant kitchen, Lupin's dog park and a Chicago snowstorm.
 
 Built with **TypeScript + Three.js + Vite**. Everything (characters, karts, tracks, music, sound effects) is
