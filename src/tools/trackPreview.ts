@@ -116,6 +116,14 @@ function placeCamera(): THREE.Vector3 {
     camera.lookAt(center);
     return center;
   }
+  if (camMode === 'look') {
+    const p = (params.get('p') ?? '0,50,0').split(',').map(Number);
+    const a = (params.get('at') ?? '0,0,0').split(',').map(Number);
+    camera.position.set(p[0], p[1], p[2]);
+    const at = new THREE.Vector3(a[0], a[1], a[2]);
+    camera.lookAt(at);
+    return at;
+  }
   const pid = camMode === 'chase' ? Math.min(pathParam, track.paths.length - 1) : 0;
   const s = camMode === 'start' ? track.length - 30 : camS;
   const a = track.sampleAt(pid, s);

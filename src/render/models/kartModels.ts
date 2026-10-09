@@ -318,8 +318,10 @@ export function buildKart(def: CharacterDef): KartRig {
   // ---- seat ----
   const seatMat = plastic(st.seat, id === 'grandma' ? 0.85 : 0.55);
   const comfy = id === 'grandma';
-  const seatBack = mesh(roundedBox(0.6, comfy ? 0.62 : 0.56, comfy ? 0.2 : 0.12, comfy ? 0.09 : 0.05, 2), seatMat);
-  seatBack.position.set(0, st.cockpitY + 0.32, seatZ - 0.3);
+  const dogBed = id === 'lupin';
+  const backH = comfy ? 0.62 : dogBed ? 0.34 : 0.56;
+  const seatBack = mesh(roundedBox(0.6, backH, comfy || dogBed ? 0.2 : 0.12, comfy || dogBed ? 0.09 : 0.05, 2), seatMat);
+  seatBack.position.set(0, st.cockpitY + 0.04 + backH / 2, seatZ - 0.3);
   seatBack.rotation.x = -0.18;
   body.add(seatBack);
   const seatBase = mesh(roundedBox(0.58, 0.1, 0.45, 0.04, 1), seatMat);
@@ -337,7 +339,7 @@ export function buildKart(def: CharacterDef): KartRig {
     pillow.position.set(0, st.cockpitY + 0.7, seatZ - 0.33);
     pillow.rotation.x = -0.25;
     body.add(pillow);
-  } else {
+  } else if (!dogBed) {
     // racing headrest wings
     for (const s of [-1, 1]) {
       const wing = mesh(roundedBox(0.08, 0.3, 0.16, 0.035, 1), seatMat);

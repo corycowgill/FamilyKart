@@ -1,6 +1,7 @@
 import { clamp, forwardOf, mod, rightOf, wrapAngle, wrapDelta } from '../../core/math';
 import { Rng } from '../../core/rng';
 import { characterById } from '../../data/characters';
+import { beginRespawn } from '../kart/KartPhysics';
 import type { RaceSim } from '../race/RaceSim';
 import type { KartInput, KartState } from '../types';
 
@@ -36,6 +37,9 @@ export const AI_DIFFICULTY: Record<'easy' | 'normal' | 'hard', AIDifficultyConfi
 
 type AIState = 'race' | 'recover' | 'mistake';
 
+/** Seconds without any race progress before an AI racer is respawned on the track. */
+export const AI_NO_PROGRESS_RESPAWN = 8;
+
 /**
  * AI racer. Produces KartInput for the shared kart controller (no cheating, no teleporting).
  * Behaviour: racing-line following with curvature-based speed planning, drifting in long corners,
@@ -55,6 +59,8 @@ export class AIDriver {
   private driftTime = 0;
   private personality;
   private reverseSteer = 0;
+  private bestProgress = -Infinity;
+  private noProgressTime = 0;
   /** Debug: last target point */
   target = { x: 0, y: 0, z: 0 };
 
@@ -86,6 +92,22 @@ export class AIDriver {
     const input: KartInput = { throttle: 1, steer: 0, drift: false, useItem: false, useSpecial: false };
     if (sim.phase !== 'racing') return { ...input, throttle: 0 };
     this.stateTime += dt;
+
+    // --- watchdog: no race progress for a long time (e.g. turned around and pinned on a shoulder, where the
+    // reverse/forward recovery cycle keeps speed above the physics stuck threshold) => ask for a respawn.
+    if (k.respawnTime > 0 || k.finished) {
+      this.bestProgress = k.raceDistance;
+      this.noProgressTime = 0;
+    } else if (k.raceDistance > this.bestProgress + 1) {
+      this.bestProgress = k.raceDistance;
+      this.noProgressTime = 0;
+    } else if ((this.noProgressTime += dt) > AI_NO_PROGRESS_RESPAWN) {
+      this.noProgressTime = 0;
+      this.state = 'race';
+      this.stateTime = 0;
+      beginRespawn(k, sim.events);
+      return { ...input, throttle: 0 };
+    }
 
     // --- recovery
     if (this.state === 'race' && Math.abs(k.forwardSpeed) < 1.5 && k.respawnTime <= 0 && k.spinTime <= 0) {
@@ -147,7 +169,13 @@ export class AIDriver {
       } else {
         // approach the shortcut entrance; abandon it if we've already passed the junction
         const aheadMain = wrapDelta(p.shortcut!.from * L - k.mainS, L);
-        if (aheadMain < -4) {
+        // the entrance can sit a few metres off its nominal main-path fraction: also give up if the point we
+        // would steer at is physically behind us along the road (otherwise a slow kart, e.g. one spun out right
+        // at the junction, turns around to reach it and drives the wrong way)
+        const tp = track.pointAt(this.takingShortcut, Math.max(0, -aheadMain + look), 0);
+        const here = track.sampleAt(0, k.mainS);
+        const targetAhead = (tp.x - k.pos.x) * here.tx + (tp.z - k.pos.z) * here.tz;
+        if (aheadMain < -4 || targetAhead < -2) {
           this.takingShortcut = -1;
           return this.update(dt);
         }

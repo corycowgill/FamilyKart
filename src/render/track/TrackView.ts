@@ -201,7 +201,7 @@ const shoulderStripes = (a: string, b: string, edge?: string) => () =>
 
 const STYLES: Record<TrackTheme, Style> = {
   chicago: {
-    road: { base: '#585b62', speck: ['#3f4146', '#6f727a', '#7d776b', '#4a4c51'], edge: '#ffffff', center: '#ffffff', patches: ['#45474d', '#66686e'] },
+    road: { base: '#666970', speck: ['#4a4c52', '#7b7e86', '#8a8478', '#55575d'], edge: '#ffffff', center: '#ffffff', patches: ['#45474d', '#66686e'] },
     roadTile: 16, roadRough: 0.88,
     shoulder: shoulderStripes('#6cc04f', '#5fb045', '#d8d4c8'), shoulderTile: 8, shoulderRough: 0.95,
     curb: ['#e3262b', '#f7f7f7'],

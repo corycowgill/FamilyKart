@@ -67,6 +67,9 @@ export class RaceSim {
   readonly dt = PHYSICS.dt;
   stepCount = 0;
   private placeOrder: number[] = [];
+  /** Per kart: furthest raceDistance reached, and whether it was respawning last step. */
+  private bestDistance: number[] = [];
+  private respawned: boolean[] = [];
 
   constructor(cfg: RaceConfig) {
     this.track = cfg.track instanceof Track ? cfg.track : new Track(cfg.track);
@@ -246,13 +249,24 @@ export class RaceSim {
     const L = this.track.length;
     const cpSpacing = L / this.track.checkpoints.length;
     for (const k of this.karts) {
-      if (k.respawnTime > 0) continue;
+      if (k.respawnTime > 0) {
+        this.respawned[k.id] = true;
+        continue;
+      }
       let delta = k.mainS - (((k.raceDistance % L) + L) % L);
       if (delta > L / 2) delta -= L;
       if (delta < -L / 2) delta += L;
-      // ignore implausible jumps (e.g. projection glitch); respawn handles real teleports
-      if (Math.abs(delta) > 60) delta = 0;
+      if (this.respawned[k.id]) {
+        // a respawn legitimately teleports the kart to its last safe spot (a place it has already driven):
+        // resync progress, but never beyond the furthest point it has actually reached
+        this.respawned[k.id] = false;
+        delta = Math.min(delta, (this.bestDistance[k.id] ?? k.raceDistance) - k.raceDistance);
+      } else if (Math.abs(delta) > 60) {
+        // ignore implausible jumps (e.g. projection glitch)
+        delta = 0;
+      }
       k.raceDistance += delta;
+      this.bestDistance[k.id] = Math.max(this.bestDistance[k.id] ?? -Infinity, k.raceDistance);
       if (this.phase !== 'racing' || k.finished) continue;
       // checkpoints: must be passed in order; a lap is completed only after all of them
       const nextCpDist = k.lapsCompleted * L + (k.nextCheckpoint + 1) * cpSpacing;

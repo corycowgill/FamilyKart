@@ -333,7 +333,9 @@ export class Placer {
         if (smp.gap) continue;
         const lat = side * (smp.halfWidth + this.track.def.shoulder + offset + this.rng.range(0, opts.jitter ?? 0));
         const x = smp.x + smp.nx * lat, z = smp.z + smp.nz * lat;
-        if (!this.ok(x, z, r, opts.margin ?? 1)) continue;
+        // the spot sits `offset` outside this path's wall; reject if another part of the track is closer
+        if (this.field.clearance(x, z, 64) < offset * 0.8 - 0.5 || !this.free(x, z, r)) continue;
+        if (this.field.insideOther(x, z, -1, -1)) continue;
         if (opts.reserve !== false) this.reserve(x, z, r);
         const yaw = Math.atan2(-smp.nx * side, -smp.nz * side); // +Z of the prop faces the road
         out.push({ x, y: this.field.height(x, z), z, yaw });

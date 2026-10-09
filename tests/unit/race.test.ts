@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { Rng } from '../../src/core/rng';
 import { TRACKS } from '../../src/data/tracks/index';
 import { CHICAGO } from '../../src/data/tracks/chicago';
+import { AI_NO_PROGRESS_RESPAWN } from '../../src/sim/ai/AIDriver';
 import { PHYSICS } from '../../src/sim/kart/kartConfig';
 import { RaceSim } from '../../src/sim/race/RaceSim';
 import { Track } from '../../src/sim/track/Track';
 import type { CharacterId, KartInput, KartState, SimEvent } from '../../src/sim/types';
-import { ALL_CHARACTERS, OVAL, STADIUM, aiSim, followTrack, humanSim, placeInSim, runToEnd } from './fixtures';
+import { beginRespawn } from '../../src/sim/kart/KartPhysics';
+import { ALL_CHARACTERS, OVAL, STADIUM, aiSim, followTrack, humanSim, placeInSim, placeKart, runToEnd } from './fixtures';
 
 /** Step a sim with player 0 driven by a function; returns events. */
 function drivePlayer(sim: RaceSim, k: KartState, seconds: number, fn: (k: KartState) => KartInput): SimEvent[] {
@@ -85,6 +87,30 @@ describe('lap detection & checkpoints', () => {
     sim.step([]);
     expect(Math.abs(k.raceDistance - before)).toBeLessThan(1);
     expect(k.nextCheckpoint).toBe(0);
+  });
+
+  it('respawning forward to the last safe spot resyncs progress (no frozen raceDistance)', () => {
+    const sim = humanSim(STADIUM, 1, { laps: 3 });
+    const k = sim.karts[0];
+    placeInSim(sim, k, 300, 0);
+    sim.step([]);
+    const safe = { ...k.lastSafe, pos: { ...k.lastSafe.pos } };
+    // the kart then drives ~100 m the wrong way (progress follows it back) and gets stuck there
+    for (let s = 296; s >= 200; s -= 4) {
+      placeKart(sim.track, k, s, 0);
+      sim.step([]);
+    }
+    expect(k.raceDistance).toBeLessThan(210);
+    k.lastSafe = safe; // e.g. it was facing backwards / off-road, so lastSafe was never refreshed
+    beginRespawn(k, sim.events);
+    for (let i = 0; i < 120 && k.respawnTime > 0; i++) sim.step([]);
+    sim.step([]);
+    expect(k.mainS).toBeGreaterThan(280);
+    expect(Math.abs(k.raceDistance - k.mainS)).toBeLessThan(2);
+    expect(k.raceDistance).toBeLessThanOrEqual(300 + 1e-6);
+    // and progress keeps counting from there
+    drivePlayer(sim, k, 2, (kk) => followTrack(sim.track, kk));
+    expect(k.raceDistance).toBeGreaterThan(310);
   });
 
   it('checkpoints are passed in order', () => {
@@ -250,6 +276,24 @@ describe('AI', () => {
     const hard = finishAll(OVAL, 'hard', 2, 240).sim;
     const avg = (s: RaceSim) => s.karts.reduce((a, k) => a + k.finishTime, 0) / s.karts.length;
     expect(avg(hard)).toBeLessThan(avg(easy));
+  });
+
+  it('an AI racer that makes no progress for a long time is respawned (watchdog)', () => {
+    const sim = aiSim(STADIUM, { seed: 3, countdown: 0.05 });
+    while (sim.phase === 'countdown') sim.step();
+    const k = sim.karts[0];
+    placeInSim(sim, k, 300, 0);
+    const pinned = { ...k.pos };
+    let respawnAt = -1;
+    for (let i = 0; i < 60 * (AI_NO_PROGRESS_RESPAWN + 2) && respawnAt < 0; i++) {
+      sim.step();
+      if (sim.drainEvents().some((e) => e.type === 'respawn' && e.kart === k.id)) respawnAt = sim.time;
+      // hold the kart in place but keep it "moving" so the physics stuck timer never fires
+      k.pos = { ...pinned };
+      k.stuckTime = 0;
+    }
+    expect(respawnAt).toBeGreaterThan(AI_NO_PROGRESS_RESPAWN - 0.5);
+    expect(respawnAt).toBeLessThan(AI_NO_PROGRESS_RESPAWN + 1);
   });
 
   it('AI rubber-banding is mild and bounded', () => {

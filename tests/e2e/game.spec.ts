@@ -81,7 +81,7 @@ test.describe('Cowgill Kart Racing', () => {
   });
 
   test('settings persist across reloads', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nointro');
     await waitScreen(page, 'title');
     await page.keyboard.press('Enter');
     await waitScreen(page, 'menu');

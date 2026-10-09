@@ -267,8 +267,8 @@ function openMouth(ctx: Ctx, st: FaceStyle, x: number, y: number, w: number, dep
   ctx.beginPath();
   ctx.moveTo(x - w / 2, y - 4);
   ctx.quadraticCurveTo(x, y + topCurve - 4, x + w / 2, y - 4);
-  ctx.lineTo(x + w / 2, y + depth * 0.22);
-  ctx.quadraticCurveTo(x, y + topCurve + depth * 0.3, x - w / 2, y + depth * 0.22);
+  ctx.lineTo(x + w / 2, y + depth * 0.16);
+  ctx.quadraticCurveTo(x, y + topCurve + depth * 0.22, x - w / 2, y + depth * 0.16);
   ctx.closePath();
   ctx.fill();
   ctx.restore();
@@ -420,7 +420,7 @@ function drawHumanFace(ctx: Ctx, st: FaceStyle, expr: Expression) {
   switch (expr) {
     case 'normal':
     case 'blink':
-      openMouth(ctx, st, mx, my, mw, mw * 0.36, 10);
+      openMouth(ctx, st, mx, my, mw, mw * 0.5, 12);
       break;
     case 'laugh':
       openMouth(ctx, st, mx, my - 6, mw * 1.2, mw * 0.62, 6);

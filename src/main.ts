@@ -19,6 +19,8 @@ async function boot(): Promise<void> {
   (window as unknown as { __game: Game }).__game = game;
   game.updateFpsVisibility();
   await game.start((p) => (bar.style.width = `${Math.round(p * 100)}%`));
+  // let the Hallucinated Games ident finish before revealing the title (the game loads underneath it)
+  await ((window as unknown as { __studioIntro?: Promise<void> }).__studioIntro ?? Promise.resolve());
   loader.classList.add('hidden');
   setTimeout(() => loader.remove(), 600);
 }

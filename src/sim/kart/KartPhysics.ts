@@ -50,6 +50,7 @@ export function stepKart(k: KartState, input: KartInput, dt: number, track: Trac
       k.prevPos = { ...k.pos };
       k.yaw = k.prevYaw = k.lastSafe.yaw;
       k.pathId = k.lastSafe.pathId;
+      k.mainS = k.lastSafe.mainS; // keep race progress in sync on the teleport step
       k.invulnTime = Math.max(k.invulnTime, 1.5);
       k.forwardSpeed = 0;
     }

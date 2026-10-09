@@ -9,8 +9,30 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Lilita+One&display=swap" rel="stylesheet" />
+    <!-- Studio ident. Vendored from gameCentral/intro/hallucinated-intro.js so this
+         game stays a self-contained deploy; re-copy that file to take an update.
+         Plain script, not a module: it defines window.HallucinatedIntro. -->
+    <script src="./intro/hallucinated-intro.js"></script>
   </head>
   <body>
+    <!-- Start the studio ident before anything else paints. Classic script at the top of
+         <body> (a module is deferred and would let the loader paint first). main.ts awaits
+         window.__studioIntro before revealing the title, so the game loads underneath it. -->
+    <script>
+      window.__studioIntro = (function () {
+        try {
+          var q = new URLSearchParams(location.search);
+          // test flags skip the ident so its overlay doesn't swallow synthetic input
+          if (q.has('nointro') || q.has('dev') || q.has('laps') || q.has('autopilot') || !window.HallucinatedIntro) {
+            return Promise.resolve();
+          }
+          // No sting: on a cold load there is no user gesture yet, so audio would be dropped.
+          return window.HallucinatedIntro.play({ skippable: true, sound: false }).catch(function () {});
+        } catch (e) {
+          return Promise.resolve();
+        }
+      })();
+    </script>
     <div id="app">
       <div id="viewport"></div>
       <div id="ui"></div>

@@ -60,7 +60,7 @@ function parseArgs(argv: string[]): Options {
 
 const SPEED_SANITY = 70; // m/s absolute sanity bound
 const OUTSIDE_WALL_LIMIT = 1; // seconds a kart may sit outside the barrier before it's flagged
-const PROGRESS_STALL_LIMIT = 4; // seconds of fast forward driving on the road without race progress
+const PROGRESS_STALL_LIMIT = 4; // seconds of fast, track-aligned driving on the road without raceDistance increasing
 
 interface Instability {
   race: number;
@@ -107,12 +107,13 @@ interface Counters {
   itemsUsed: Record<string, number>;
   mysteryResults: Record<string, number>;
   specials: Record<string, number>;
+  shortcutEntries: number;
 }
 
 const newCounters = (): Counters => ({
   overtakes: 0, bumps: 0, walls: 0, hits: 0, hitsByCause: {}, shieldBlocks: 0, respawns: 0, respawnFall: 0, respawnStuck: 0, respawnLost: 0,
   jumps: 0, driftStarts: 0, driftTierEvents: {}, driftBoosts: {}, boostsByKind: {}, itemPickups: 0, itemsGranted: {}, itemsUsed: {},
-  mysteryResults: {}, specials: {},
+  mysteryResults: {}, specials: {}, shortcutEntries: 0,
 });
 
 const inc = (r: Record<string, number>, k: string, n = 1) => (r[k] = (r[k] ?? 0) + n);
@@ -186,6 +187,7 @@ function runRace(
   const t0 = performance.now();
   const dt = sim.dt;
   const mysteryPending = new Set<number>();
+  const lastPath = sim.karts.map(() => 0);
   while (sim.phase !== 'finished') {
     sim.step();
     const events = sim.drainEvents();
@@ -193,6 +195,8 @@ function runRace(
     if (sim.phase === 'countdown') continue;
     for (const k of sim.karts) {
       const w = watch[k.id];
+      if (k.pathId > 0 && lastPath[k.id] === 0) c.shortcutEntries++;
+      lastPath[k.id] = k.pathId;
       const vals = [k.pos.x, k.pos.y, k.pos.z, k.vel.x, k.vel.z, k.vy, k.yaw, k.raceDistance];
       if (vals.some((v) => !Number.isFinite(v))) {
         flag(k, 'nan', `pos=(${k.pos.x},${k.pos.y},${k.pos.z}) vel=(${k.vel.x},${k.vel.z})`);
@@ -214,13 +218,14 @@ function runRace(
         if (w.outside > OUTSIDE_WALL_LIMIT) flag(k, 'outsideWalls', `lateral ${q.lateral.toFixed(1)} vs wallDist ${q.wallDist.toFixed(1)} on path ${q.pathId} at s=${q.s.toFixed(0)}`);
       } else w.outside = 0;
       // progress desync: driving forward on the road at speed while raceDistance doesn't move
-      if (!k.finished && k.grounded && k.forwardSpeed > 10 && q && q.contained && !q.inGap) {
+      const aligned = q ? Math.sin(k.yaw) * q.tx + Math.cos(k.yaw) * q.tz > 0.7 : false;
+      if (!k.finished && k.grounded && k.forwardSpeed > 10 && aligned && q && q.contained && !q.inGap) {
         if (k.raceDistance <= w.lastDist + 0.01) {
           w.stall += dt;
           if (w.stall > PROGRESS_STALL_LIMIT) flag(k, 'progressStall', `raceDistance stuck at ${k.raceDistance.toFixed(0)} (mainS ${k.mainS.toFixed(0)}, path ${k.pathId})`);
         } else w.stall = 0;
       } else w.stall = 0;
-      w.lastDist = Math.max(w.lastDist, k.raceDistance);
+      w.lastDist = k.raceDistance;
     }
   }
   const wallMs = performance.now() - t0;
@@ -412,6 +417,7 @@ function main(): void {
   const dbTotal = (db.drift1 ?? 0) + (db.drift2 ?? 0) + (db.drift3 ?? 0);
   out.push(`drift boosts ${dbTotal} (${perRace(dbTotal)}/race, ${pct(dbTotal, counters.driftStarts)} of drifts)   tier1 ${db.drift1 ?? 0}  tier2 ${db.drift2 ?? 0}  tier3 ${db.drift3 ?? 0}`);
   out.push(`boosts by kind: ${JSON.stringify(counters.boostsByKind)}`);
+  out.push(`shortcut entries ${counters.shortcutEntries} (${perRace(counters.shortcutEntries)}/race)`);
 
   out.push('');
   out.push('-- Items --');

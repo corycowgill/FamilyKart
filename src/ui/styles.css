@@ -212,3 +212,4 @@ button { font-family: var(--font-display); cursor: pointer; }
   .menu-list .btn, .btn { font-size: 18px; padding: 6px 18px; }
   .logo { margin-bottom: 2vh; }
 }
+#ui .pass-through .panel, #ui .pass-through button { pointer-events: auto; }
