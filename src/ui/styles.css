@@ -278,3 +278,103 @@ body.touch-mode .hud .speed { left: 50%; right: auto; transform: translateX(-50%
 @media (max-height: 520px) {
   body.touch-mode .hud .pos { left: 2vw; right: auto; top: calc(2vh + 40px); font-size: 46px; }
 }
+
+/* ======================================================================
+   Compact layouts for phones in landscape (short screens)
+   ====================================================================== */
+@media (max-height: 520px) {
+  .screen { padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  .screen-title { font-size: 26px; margin: 0; }
+  .screen-sub { font-size: 13px; margin-bottom: 6px; }
+  .footer-hint, .corner-stats { display: none; }
+  .logo { margin-bottom: 8px; }
+  .logo .l1 { font-size: 56px; -webkit-text-stroke-width: 3px; }
+  .logo .l2 { font-size: 26px; margin-top: 2px; }
+  .menu-list { gap: 7px; }
+  .menu-list .btn { min-width: 250px; font-size: 18px; padding: 5px 16px; border-width: 3px; }
+  .menu-list .btn-row .btn { min-width: 118px; }
+  .btn { font-size: 17px; padding: 5px 16px; min-width: 0; border-width: 3px; border-radius: 14px; }
+
+  /* character select: info panel left, cards in a grid on the right, kart in the middle */
+  .char-screen { justify-content: flex-start; }
+  .char-top { align-self: center; }
+  .char-info { position: fixed; left: max(10px, env(safe-area-inset-left)); top: 50px; bottom: 10px; width: min(250px, 32vw); padding: 10px 12px; overflow-y: auto; border-radius: 16px; }
+  .char-info h2 { font-size: 26px; }
+  .char-info .title { font-size: 15px; margin: 0 0 4px; }
+  .char-info .tag { display: none; }
+  .stat { grid-template-columns: 82px 1fr; font-size: 12px; margin: 3px 0; }
+  .stat .pip { height: 9px; }
+  .special-box { margin-top: 8px; padding: 6px 8px; font-size: 12px; line-height: 1.25; }
+  .special-box b { font-size: 15px; }
+  .char-screen > div:last-child { position: fixed; right: max(10px, env(safe-area-inset-right)); top: 50px; bottom: 10px; width: min(260px, 32vw); display: flex; flex-direction: column; justify-content: space-between; }
+  .char-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; }
+  .char-card { width: auto; padding: 3px; border-width: 3px; border-radius: 12px; font-size: 12px; }
+  .char-card.selected { transform: scale(1.04); }
+  .char-card img { border-radius: 8px; }
+  .char-screen .btn-row { flex-wrap: nowrap; gap: 8px; }
+  .char-screen .btn-row .btn { flex: 1; }
+
+  /* track select: horizontal swipe row */
+  .options-row { margin: 4px 0; gap: 8px; }
+  .label { font-size: 15px; }
+  .seg button { font-size: 14px; padding: 4px 12px; }
+  .track-grid { display: flex; grid-template-columns: none; overflow-x: auto; scroll-snap-type: x mandatory; gap: 12px; width: 100%; padding: 6px 4px 10px; -webkit-overflow-scrolling: touch; touch-action: pan-x; }
+  .track-card { flex: 0 0 min(210px, 42vw); scroll-snap-align: center; border-width: 3px; }
+  .track-card:hover, .track-card:focus-visible, .track-card.selected { transform: scale(1.02); }
+  .track-card canvas { aspect-ratio: 16/9; }
+  .track-card .tc-body { padding: 6px 10px 8px; }
+  .track-card h3 { font-size: 16px; }
+  .track-card .meta { font-size: 11px; }
+
+  /* results: compact table, buttons always visible */
+  .results { top: max(6px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); width: min(470px, 62vw); max-height: calc(100% - 12px); display: flex; flex-direction: column; padding: 10px 14px; }
+  .results h2 { font-size: 24px; margin: 0; }
+  .results .screen-sub { margin: 0 !important; }
+  .results table { font-size: 12px; border-spacing: 0 3px; }
+  .results td { padding: 2px 6px; }
+  .results td:first-child { font-size: 1.1em; width: 34px; }
+  .results img { width: 22px; height: 22px; }
+  .results .records { margin: 2px 0; font-size: 13px; }
+  .results .btn-row { margin-top: 8px; flex-wrap: nowrap; }
+  .results .btn { font-size: 14px; padding: 5px 10px; }
+  .winner-banner { font-size: 34px; bottom: 4vh; -webkit-text-stroke-width: 2px; }
+
+  .modal h2 { font-size: 30px; margin-bottom: 8px; }
+  .modal { padding: 12px 16px; }
+  .settings .row { margin: 5px 0; font-size: 15px; }
+  .loading-box h2 { font-size: 32px; }
+  .loading-box .tip { font-size: 14px; }
+}
+
+/* notch / home-indicator safe areas for the in-race HUD and touch controls */
+.hud .lap, .hud .board { left: max(2vw, env(safe-area-inset-left)); }
+.hud .timer, .hud .minimap { right: max(1.5vw, env(safe-area-inset-right)); }
+.touch-buttons { right: max(2vw, env(safe-area-inset-right)); bottom: max(3vh, env(safe-area-inset-bottom)); }
+.touch-steer-zone { padding-left: env(safe-area-inset-left); }
+
+/* small minimap on phones instead of none */
+@media (max-width: 800px) {
+  body.touch-mode .hud .minimap { display: block; width: 96px; height: 96px; }
+}
+@media (max-height: 520px) { .garage-recs { display: none; } }
+/* touch control options */
+.touch-btn.gas { right: 132px; bottom: 96px; width: 82px; height: 82px; background: radial-gradient(circle at 35% 30%, #a6f5b5, #26a447 70%); }
+.touch-controls.manual-gas .touch-btn.item { right: 226px; bottom: 30px; }
+.touch-buttons { transform-origin: bottom right; }
+.touch-controls.size-s .touch-buttons { transform: scale(0.8); }
+.touch-controls.size-l .touch-buttons { transform: scale(1.18); }
+.touch-controls.size-s .touch-stick { transform: scale(0.85); }
+.touch-controls.size-l .touch-stick { transform: scale(1.15); }
+.touch-controls.lefty .touch-steer-zone { left: auto; right: 0; }
+.touch-controls.lefty .touch-buttons { right: auto; left: max(2vw, env(safe-area-inset-left)); transform-origin: bottom left; }
+.touch-controls.lefty .touch-btn { right: auto; }
+.touch-controls.lefty .touch-btn.drift { left: 0; }
+.touch-controls.lefty .touch-btn.brake { left: 132px; }
+.touch-controls.lefty .touch-btn.item { left: 128px; }
+.touch-controls.lefty .touch-btn.special { left: 18px; }
+.touch-controls.lefty .touch-btn.gas { left: 132px; }
+.touch-controls.lefty.manual-gas .touch-btn.item { left: 226px; }
+body.touch-mode .kb-section { display: none; }
+body.touch-mode .settings input[type=checkbox] { width: 26px; height: 26px; accent-color: var(--yellow); }
+body.touch-mode .settings select { font-size: 16px; padding: 6px 10px; }
+body.touch-mode .settings input[type=range] { height: 28px; }

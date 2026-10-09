@@ -1,4 +1,5 @@
 import type { CharacterId, Difficulty } from '../sim/types';
+import type { TouchOptions } from '../input/TouchControls';
 
 export interface Settings {
   master: number;
@@ -14,6 +15,8 @@ export interface Settings {
   keys?: Record<string, string[]>;
   /** true once the player picked a graphics quality themselves */
   qualityChosen?: boolean;
+  /** on-screen touch control preferences */
+  touch?: TouchOptions;
 }
 
 export interface TrackRecord {

@@ -157,7 +157,7 @@ export class Showroom {
       const isSec = e.id === this.secondary;
       const target = isSel ? new THREE.Vector3(0, 0.35, 0) : isSec ? new THREE.Vector3(4.2, 0, 1) : e.home;
       e.kart.root.position.lerp(target, Math.min(1, dt * 5));
-      const yawTarget = isSel ? Math.PI * 0.85 + this.spin : isSec ? Math.PI * 0.8 : e.homeYaw + Math.PI;
+      const yawTarget = isSel ? -0.55 + this.spin : isSec ? Math.PI * 0.8 : e.homeYaw + Math.PI;
       let d = yawTarget - e.kart.root.rotation.y;
       if (!isSel) {
         while (d > Math.PI) d -= Math.PI * 2;

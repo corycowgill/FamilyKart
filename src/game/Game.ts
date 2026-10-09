@@ -2,7 +2,7 @@ import { audio } from '../audio/AudioEngine';
 import { CHARACTERS, characterById } from '../data/characters';
 import { CUPS, TRACKS, trackById } from '../data/tracks/index';
 import { DEFAULT_KEYS_P1, Input, type Action, type KeyMap } from '../input/Input';
-import { isTouchDevice, TouchControls } from '../input/TouchControls';
+import { DEFAULT_TOUCH_OPTIONS, isTouchDevice, requestTiltPermission, TouchControls, type TouchOptions } from '../input/TouchControls';
 import { formatTime, Save } from '../persist/Save';
 import { Podium } from '../render/Podium';
 import { Renderer } from '../render/Renderer';
@@ -84,6 +84,18 @@ export class Game {
     this.testFlags.laps = Number(params.get('laps') ?? 0);
     this.testFlags.autopilot = params.has('autopilot');
     window.addEventListener('keydown', (e) => this.onKey(e));
+    // phones: pause when the app is backgrounded / the screen locks, silence audio while hidden
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (this.session && this.screenName === 'race' && !this.pauseEl && !this.resultsShown) this.togglePause();
+        audio.setPaused(true);
+      } else if (!this.pauseEl) {
+        audio.setPaused(false);
+      }
+    });
+    // iOS Safari: block pinch / double-tap zoom gestures that fight the touch controls
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+    document.addEventListener('dblclick', (e) => e.preventDefault());
     this.input.pads.onConnectionChange = (n) => {
       const t = h('div', { class: 'toast-pad' }, n > 0 ? `🎮 Controller connected${n > 1 ? ` (${n})` : ''}` : '🎮 Controller disconnected');
       document.body.append(t);
@@ -101,11 +113,15 @@ export class Game {
       audio.init().then(() => {
         if (this.screenName === 'title' || this.screenName === 'menu') audio.startMusic('menu');
       });
-      window.removeEventListener('pointerdown', unlock);
-      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('pointerdown', unlock as EventListener);
+      window.removeEventListener('keydown', unlock as EventListener);
     };
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
+    // iOS only counts touchend/click as a user activation for starting audio
+    const iosUnlock = () => void audio.init();
+    window.addEventListener('touchend', iosUnlock, { passive: true });
+    window.addEventListener('click', iosUnlock);
   }
 
   async start(onProgress: (p: number) => void): Promise<void> {
@@ -447,6 +463,7 @@ export class Game {
     session.on((e) => {
       this.hud?.event(e);
       this.rumbleFor(e);
+      if (e.type === 'go') this.touch?.recalibrate();
       if (e.type === 'raceOver') setTimeout(() => this.onRaceOver(), 2500);
     });
     session.setDebug(this.debug);
@@ -454,7 +471,7 @@ export class Game {
     this.screenName = 'race';
     this.ui.append(this.hud.root);
     if (isTouchDevice() && this.mode !== 'versus') {
-      this.touch = new TouchControls(this.ui);
+      this.touch = new TouchControls(this.ui, this.touchOptions);
       this.touch.onPause = () => this.togglePause();
       this.input.touch = this.touch;
     }
@@ -629,7 +646,7 @@ export class Game {
     let current: CharacterId = this.players[0];
     const info = h('div', { class: 'char-info panel' });
     const cards = h('div', { class: 'char-cards' });
-    const recs = h('div', { class: 'panel', style: 'position:fixed;right:3vw;top:18vh;width:min(340px,30vw);font-weight:700' });
+    const recs = h('div', { class: 'panel garage-recs', style: 'position:fixed;right:3vw;top:18vh;width:min(340px,30vw);font-weight:700' });
     const refresh = () => {
       room.select(current);
       const d = characterById(current);
@@ -718,7 +735,8 @@ export class Game {
         h('div', { class: 'row' }, h('span', {}, 'Graphics quality'), quality),
         check('Steering assist (younger racers)', 'steeringAssist'),
         check('Show FPS', 'showFps', () => this.updateFpsVisibility()),
-        h('h3', {}, 'Controls (Player 1)'), keys, resetKeys,
+        isTouchDevice() ? this.touchSettings() : null,
+        h('div', { class: 'kb-section' }, h('h3', {}, 'Controls (Player 1)'), keys, resetKeys),
         h('div', { style: 'font-size:13px;opacity:0.8;margin-top:8px' }, 'Xbox controller: RT gas · LT brake · Left stick / D-pad steer · RB or LB drift · Ⓐ item · Ⓧ special · Ⓨ look back · ☰ Menu pause · Ⓑ back. In 2-player, one controller goes to Player 2 (Player 1 uses the keyboard); with two controllers each player gets one. Press ` (backquote) for debug mode.'),
         h('div', { class: 'btn-row', style: 'margin-top:14px' }, this.btn('Done', 'green', () => close(), 'btn-settings-done'))));
     const close = () => {
@@ -727,6 +745,32 @@ export class Game {
     };
     this.ui.append(modal);
     modal.querySelector<HTMLElement>('input')?.focus();
+  }
+
+  /** Settings rows for the on-screen touch controls (only shown on touch devices). */
+  private touchSettings(): HTMLElement {
+    const o = this.touchOptions;
+    const set = (patch: Partial<TouchOptions>) => this.save.updateSettings({ touch: { ...this.touchOptions, ...patch } });
+    const check = (label: string, key: 'autoGas' | 'tilt' | 'leftHanded', testid: string) => {
+      const c = h('input', { type: 'checkbox', checked: o[key], 'data-testid': testid });
+      c.addEventListener('change', async () => {
+        if (key === 'tilt' && c.checked && !(await requestTiltPermission())) {
+          c.checked = false;
+          return;
+        }
+        set({ [key]: c.checked });
+      });
+      return h('div', { class: 'row' }, h('span', {}, label), c);
+    };
+    const size = h('select', { 'data-testid': 'touch-size' }, ...(['s', 'm', 'l'] as const).map((v) => h('option', { value: v, selected: o.size === v }, { s: 'Small', m: 'Medium', l: 'Large' }[v])));
+    size.addEventListener('change', () => set({ size: size.value as TouchOptions['size'] }));
+    return h('div', {},
+      h('h3', {}, 'Touch controls'),
+      check('Automatic gas', 'autoGas', 'touch-autogas'),
+      check('Tilt to steer (turn the device like a wheel)', 'tilt', 'touch-tilt'),
+      check('Left-handed layout', 'leftHanded', 'touch-lefty'),
+      h('div', { class: 'row' }, h('span', {}, 'Button size'), size),
+      h('div', { style: 'font-size:13px;opacity:0.8' }, 'Tip: add the game to your home screen (Share → Add to Home Screen) to play fullscreen. Changes apply from the next race.'));
   }
 
   updateFpsVisibility(): void {
@@ -811,6 +855,9 @@ export class Game {
 
   private titleGo: ((e?: Event) => void) | null = null;
   private touch: TouchControls | null = null;
+  private get touchOptions(): TouchOptions {
+    return { ...DEFAULT_TOUCH_OPTIONS, ...(this.save.settings.touch ?? {}) };
+  }
   private touchMode = false;
   private padMode = false;
 

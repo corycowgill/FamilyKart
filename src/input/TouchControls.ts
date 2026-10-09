@@ -15,6 +15,31 @@ export interface TouchState {
 }
 
 const STICK_RANGE = 70; // px of horizontal travel for full lock
+const TILT_RANGE = 28; // degrees of device tilt for full lock
+
+export interface TouchOptions {
+  /** Gas held automatically (default). When off a GAS button appears. */
+  autoGas: boolean;
+  /** Steer by tilting the device like a steering wheel. */
+  tilt: boolean;
+  size: 's' | 'm' | 'l';
+  /** Mirror the layout: steering on the right, buttons on the left. */
+  leftHanded: boolean;
+}
+
+export const DEFAULT_TOUCH_OPTIONS: TouchOptions = { autoGas: true, tilt: false, size: 'm', leftHanded: false };
+
+/** iOS 13+ needs an explicit permission prompt (from a tap) before device orientation events fire. */
+export async function requestTiltPermission(): Promise<boolean> {
+  const DOE = (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } }).DeviceOrientationEvent;
+  if (!DOE) return false;
+  if (typeof DOE.requestPermission !== 'function') return true;
+  try {
+    return (await DOE.requestPermission()) === 'granted';
+  } catch {
+    return false;
+  }
+}
 
 export const isTouchDevice = (): boolean =>
   typeof window !== 'undefined' && (('ontouchstart' in window) || (navigator.maxTouchPoints ?? 0) > 0 || window.matchMedia?.('(pointer: coarse)').matches);
@@ -30,8 +55,13 @@ export class TouchControls {
   private specialBtn: HTMLElement;
   private itemBtn: HTMLElement;
   onPause: (() => void) | null = null;
+  private opts: TouchOptions;
+  private tiltSteer = 0;
+  private tiltZero: number | null = null;
+  private onOrientation = (e: DeviceOrientationEvent) => this.orientation(e);
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, opts: TouchOptions = DEFAULT_TOUCH_OPTIONS) {
+    this.opts = { ...opts };
     this.root = document.createElement('div');
     this.root.className = 'touch-controls';
     this.root.dataset.testid = 'touch-controls';
@@ -61,6 +91,14 @@ export class TouchControls {
     this.specialBtn = mk('special', '⚡<small>SPECIAL</small>', 'special');
     mk('brake', '🛑<small>BRAKE</small>', 'brake');
     mk('drift', '💨<small>DRIFT</small>', 'drift');
+    if (!this.opts.autoGas) mk('gas', '⏩<small>GAS</small>', 'gas');
+    this.root.classList.add(`size-${this.opts.size}`);
+    if (this.opts.leftHanded) this.root.classList.add('lefty');
+    if (!this.opts.autoGas) this.root.classList.add('manual-gas');
+    if (this.opts.tilt) {
+      hint.textContent = 'tilt to steer · or slide here';
+      window.addEventListener('deviceorientation', this.onOrientation);
+    }
 
     const pause = document.createElement('button');
     pause.className = 'touch-pause';
@@ -143,15 +181,35 @@ export class TouchControls {
     this.stickBase.classList.remove('active');
   }
 
+  /** Device tilt -> steering. Works in either landscape orientation; zeroed on the first reading (and on recalibrate()). */
+  private orientation(e: DeviceOrientationEvent): void {
+    if (e.beta === null) return;
+    const angle = (screen.orientation?.angle ?? (window as unknown as { orientation?: number }).orientation ?? 90) as number;
+    const portrait = angle === 0 || angle === 180;
+    let tilt = portrait ? (e.gamma ?? 0) : e.beta * (angle === 270 || angle === -90 ? -1 : 1);
+    if (this.tiltZero === null) this.tiltZero = tilt;
+    tilt -= this.tiltZero;
+    const raw = Math.max(-1, Math.min(1, tilt / TILT_RANGE));
+    this.tiltSteer = Math.abs(raw) < 0.06 ? 0 : raw;
+  }
+
+  /** Treat the current device angle as "straight ahead". */
+  recalibrate(): void {
+    this.tiltZero = null;
+  }
+
   get active(): boolean {
     return this.stickPointer !== null || this.held.size > 0;
   }
 
   state(): TouchState {
     const brake = this.held.has('brake');
+    const gas = this.opts.autoGas || this.held.has('gas');
+    // the on-screen stick always wins over tilt while a thumb is on it
+    const steer = this.stickPointer !== null || !this.opts.tilt ? this.steer : this.tiltSteer;
     return {
-      steer: this.steer,
-      throttle: brake ? -1 : 1,
+      steer,
+      throttle: brake ? -1 : gas ? 1 : 0,
       drift: this.held.has('drift'),
       item: this.held.has('item'),
       special: this.held.has('special'),
@@ -172,6 +230,7 @@ export class TouchControls {
   }
 
   dispose(): void {
+    window.removeEventListener('deviceorientation', this.onOrientation);
     this.root.remove();
   }
 }

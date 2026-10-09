@@ -64,5 +64,42 @@ test('touch screen: tap through menus and race with on-screen controls', async (
   await expect(page.locator('[data-testid=pause-menu]')).toBeVisible();
   await page.tap('[data-testid=btn-resume]');
   await expect(page.locator('[data-testid=pause-menu]')).toHaveCount(0);
+
+  // results must be fully usable on a phone: the buttons sit inside the viewport
+  await page.evaluate(() => (window as unknown as GameWin).__game.fastForward(400));
+  await waitScreen(page, 'results');
+  await expect(page.locator('[data-testid=btn-replay]')).toBeInViewport({ ratio: 1 });
+  await expect(page.locator('[data-testid=btn-main-menu]')).toBeInViewport({ ratio: 1 });
   expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('touch options: left-handed layout and manual gas', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('cowgill-kart-save-v1', JSON.stringify({ version: 1, settings: { touch: { autoGas: false, tilt: false, size: 'l', leftHanded: true } } }));
+  });
+  await page.goto('/?nointro&laps=1');
+  await waitScreen(page, 'title');
+  await page.tap('.title-screen');
+  await waitScreen(page, 'menu');
+  await page.tap('[data-testid=btn-quick-race]');
+  await waitScreen(page, 'character');
+  await page.tap('[data-testid=btn-confirm-character]');
+  await waitScreen(page, 'track');
+  await page.tap('[data-testid=track-chicago]');
+  await waitScreen(page, 'race');
+  const controls = page.locator('[data-testid=touch-controls]');
+  await expect(controls).toHaveClass(/lefty/);
+  await expect(controls).toHaveClass(/size-l/);
+  await expect(page.locator('.touch-btn.gas')).toBeVisible();
+  // steering zone moved to the right half, buttons to the left
+  const zone = await page.locator('.touch-steer-zone').boundingBox();
+  const drift = await page.locator('.touch-btn.drift').boundingBox();
+  expect(zone!.x).toBeGreaterThan(300);
+  expect(drift!.x).toBeLessThan(300);
+  // without auto-gas the kart stays put until GAS is held
+  await page.evaluate(() => (window as unknown as GameWin).__game.fastForward(5));
+  expect(await page.evaluate(() => (window as unknown as GameWin).__game.state.speed ?? 0)).toBeLessThan(1);
+  await touch(page, '.touch-btn.gas', 'pointerdown', 3);
+  await page.waitForFunction(() => ((window as unknown as GameWin).__game.state.speed ?? 0) > 3, null, { timeout: 120_000 });
+  await touch(page, '.touch-btn.gas', 'pointerup', 3);
 });
