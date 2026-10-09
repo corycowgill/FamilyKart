@@ -268,7 +268,7 @@ body.touch-mode .hud .pos { right: 2vw; bottom: auto; top: calc(2vh + clamp(52px
 
 /* portrait phones: ask to rotate */
 .rotate-hint { display: none; }
-@media (orientation: portrait) and (max-width: 820px) {
+@media (orientation: portrait) and (max-width: 600px) {
   body.touch-mode .rotate-hint { display: flex; position: fixed; inset: 0; z-index: 60; background: rgba(10,14,40,0.92); color: #fff; align-items: center; justify-content: center;
     flex-direction: column; gap: 14px; font-family: var(--font-display); font-size: 26px; text-align: center; padding: 24px; }
   body.touch-mode .rotate-hint span { font-size: 64px; animation: rotateIcon 1.6s ease-in-out infinite; }
@@ -378,3 +378,14 @@ body.touch-mode .kb-section { display: none; }
 body.touch-mode .settings input[type=checkbox] { width: 26px; height: 26px; accent-color: var(--yellow); }
 body.touch-mode .settings select { font-size: 16px; padding: 6px 10px; }
 body.touch-mode .settings input[type=range] { height: 28px; }
+
+/* ---------- touch reliability fixes ---------- */
+/* scrollable panels must allow vertical panning (body is touch-action:none for the race) */
+.modal-bg, .modal, .settings, .char-info, .results, .garage-recs { touch-action: pan-y; }
+.track-grid { touch-action: pan-x pan-y; }
+/* no hover/scale effects on touch screens: a button that moves under the finger cancels the tap */
+@media (hover: none) {
+  .btn:hover, .char-card:hover, .track-card:hover { transform: none; filter: none; }
+  .btn:active, .char-card:active, .track-card:active { transform: none; filter: brightness(1.2); }
+  .btn.tapped, .char-card.tapped, .track-card.tapped { filter: brightness(1.25); }
+}

@@ -12,6 +12,7 @@ import type { ItemId } from '../sim/types';
 import type { RacerConfig, RaceResult } from '../sim/race/RaceSim';
 import type { CharacterId, Difficulty, KartInput, SimEvent, TrackDef } from '../sim/types';
 import { h, ordinal } from '../ui/dom';
+import { FastTap } from '../ui/FastTap';
 import { HUD } from '../ui/HUD';
 import { Portraits } from '../ui/Portraits';
 import { drawTrackPreview } from '../ui/trackPreview';
@@ -84,6 +85,7 @@ export class Game {
     this.testFlags.laps = Number(params.get('laps') ?? 0);
     this.testFlags.autopilot = params.has('autopilot');
     window.addEventListener('keydown', (e) => this.onKey(e));
+    new FastTap(ui);
     // phones: pause when the app is backgrounded / the screen locks, silence audio while hidden
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
@@ -103,18 +105,12 @@ export class Game {
       if (n === 0 && this.session && this.screenName === 'race' && !this.pauseEl) this.togglePause();
     };
     // unlock audio on the first interaction
-    const unlock = (e: Event) => {
-      // phones: go fullscreen + landscape on the first tap where the browser allows it (not iOS Safari)
-      if ((e as PointerEvent).pointerType === 'touch' && document.documentElement.requestFullscreen && !document.fullscreenElement) {
-        document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => {
-          (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {});
-        }).catch(() => {});
-      }
+    const unlock = () => {
       audio.init().then(() => {
         if (this.screenName === 'title' || this.screenName === 'menu') audio.startMusic('menu');
       });
-      window.removeEventListener('pointerdown', unlock as EventListener);
-      window.removeEventListener('keydown', unlock as EventListener);
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
     };
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
@@ -231,6 +227,7 @@ export class Game {
     );
     const go = (e?: Event) => {
       this.titleGo = null;
+      if (this.input.lastDevice === 'touch') this.enterFullscreen();
       e?.preventDefault();
       window.removeEventListener('keydown', go);
       el.removeEventListener('click', go);
@@ -854,6 +851,15 @@ export class Game {
   }
 
   private titleGo: ((e?: Event) => void) | null = null;
+
+  /** Android/desktop Chrome: fullscreen + landscape lock (iOS Safari has no fullscreen API; use Add to Home Screen). */
+  private enterFullscreen(): void {
+    const el = document.documentElement;
+    if (!el.requestFullscreen || document.fullscreenElement) return;
+    el.requestFullscreen({ navigationUI: 'hide' }).then(() => {
+      (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {});
+    }).catch(() => {});
+  }
   private touch: TouchControls | null = null;
   private get touchOptions(): TouchOptions {
     return { ...DEFAULT_TOUCH_OPTIONS, ...(this.save.settings.touch ?? {}) };
