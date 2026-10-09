@@ -74,9 +74,11 @@ export class HUD {
       this.views.push(v);
     });
     if (players.length > 1) this.root.append(h('div', { class: 'split-line' }));
-    this.hint = h('div', { class: 'controls-hint' }, players.length > 1
+    const kb = players.length > 1
       ? 'P1: WASD · Space drift · E item · F special    |    P2: Arrows · R-Shift drift · Enter item · , special'
-      : 'W/↑ Gas · S/↓ Brake · A/D Steer · Space Drift · E Item · F Special · Q Look back · Esc Pause');
+      : 'W/↑ Gas · S/↓ Brake · A/D Steer · Space Drift · E Item · F Special · Q Look back · Esc Pause';
+    const pad = 'RT Gas · LT Brake · Left stick Steer · RB Drift · Ⓐ Item · Ⓧ Special · Ⓨ Look back · ☰ Pause';
+    this.hint = h('div', { class: 'controls-hint' }, h('span', { class: 'kb-only' }, kb), h('span', { class: 'pad-only' }, players.length > 1 ? `Controllers: ${pad}` : pad));
     this.root.append(this.hint);
     setTimeout(() => (this.hint.style.opacity = '0'), 9000);
   }

@@ -16,20 +16,22 @@ npm run dev        # http://localhost:5173
 
 ### Controls
 
-| Action | Keyboard | Gamepad |
+| Action | Keyboard | Xbox controller |
 |---|---|---|
-| Accelerate | W / ↑ | Right trigger |
-| Brake / reverse | S / ↓ | Left trigger |
-| Steer | A D / ← → | Left stick |
-| Drift / hop | Space | Right bumper |
-| Use item | E | A (south) |
-| Character special | F | X (west) |
-| Look back | Q | Y (north) |
-| Pause | Esc | Start |
+| Accelerate | W / ↑ | RT (analog) |
+| Brake / reverse | S / ↓ | LT (analog) |
+| Steer | A D / ← → | Left stick or D-pad |
+| Drift / hop | Space | RB or LB |
+| Use item | E | A |
+| Character special | F | X |
+| Look back | Q | Y |
+| Pause | Esc | Menu (☰) |
 
 **Drifting:** hold Space while steering into a corner. Sparks go blue → orange → purple; release for a mini-turbo.
 
-2-player split screen: P1 uses WASD + Space/E/F, P2 uses arrows + Right-Shift / Enter / Comma (or two gamepads).
+Xbox One / Series / 360 controllers work over USB or Bluetooth in Chrome, Edge and Firefox (press any button once so the browser exposes it). Menus: D-pad or left stick to move, A select, B back; right stick spins the kart on the character screen. Controllers rumble on hits, boosts and the finish (Chrome/Edge). On-screen prompts switch to controller buttons automatically.
+
+2-player split screen: P1 uses WASD + Space/E/F, P2 uses arrows + Right-Shift / Enter / Comma. With one controller it goes to Player 2 (Player 1 stays on the keyboard); with two controllers each player gets one.
 
 Steering assist for younger racers can be turned on in Settings or on the track-select screen.
 

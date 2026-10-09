@@ -134,6 +134,12 @@ export class Showroom {
     }
   }
 
+  /** Spin the turntable (right stick / drag). */
+  spinBy(d: number): void {
+    this.spin += d;
+    this.spinVel = d * 30;
+  }
+
   select(id: CharacterId, secondary: CharacterId | null = null): void {
     if (id !== this.selected) this.spin = 0;
     this.selected = id;

@@ -1,4 +1,5 @@
 import type { KartInput } from '../sim/types';
+import { BTN, Gamepads, type MenuAction, type PadState } from './Gamepads';
 
 export type Action = 'up' | 'down' | 'left' | 'right' | 'drift' | 'item' | 'special' | 'rear' | 'pause';
 
@@ -24,7 +25,6 @@ export const SPLIT_KEYS_P2: KeyMap = {
   up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'], drift: ['ShiftRight', 'Slash'], item: ['Enter', 'Period'], special: ['Comma', 'Quote'], rear: ['Semicolon'], pause: ['Backspace'],
 };
 
-const DEADZONE = 0.18;
 
 /**
  * Keyboard + Gamepad input. Players are mapped to a key map and/or a gamepad index.
@@ -35,15 +35,16 @@ export class Input {
   private pressedQueue: string[] = [];
   steeringAssist = false;
   keyMaps: KeyMap[] = [DEFAULT_KEYS_P1];
-  /** Gamepad index per player (-1 = any connected pad for P1). */
-  padForPlayer: number[] = [-1, 1];
-  private prevPad: Record<number, boolean[]> = {};
-  private padEdges: Array<{ pad: number; button: number }> = [];
+  readonly pads = new Gamepads();
+  private split = false;
   private smoothSteer = [0, 0];
+  /** 'gamepad' after controller input, 'keyboard' after a key press - drives on-screen prompts. */
+  lastDevice: 'keyboard' | 'gamepad' = 'keyboard';
 
   constructor(target: Window = window) {
     target.addEventListener('keydown', (e) => {
       if (!e.repeat) this.pressedQueue.push(e.code);
+      this.lastDevice = 'keyboard';
       this.down.add(e.code);
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code) && !(e.target instanceof HTMLInputElement)) e.preventDefault();
     });
@@ -53,7 +54,7 @@ export class Input {
 
   setSplitScreen(on: boolean): void {
     this.keyMaps = on ? [SPLIT_KEYS_P1, SPLIT_KEYS_P2] : [this.keyMaps[0] === SPLIT_KEYS_P1 ? DEFAULT_KEYS_P1 : this.keyMaps[0]];
-    this.padForPlayer = on ? [0, 1] : [-1];
+    this.split = on;
   }
 
   setKeyMap(player: number, map: KeyMap): void {
@@ -65,28 +66,27 @@ export class Input {
     return !!map && map[a].some((c) => this.down.has(c));
   }
 
-  private pads(): Gamepad[] {
-    if (typeof navigator === 'undefined' || !navigator.getGamepads) return [];
-    return Array.from(navigator.getGamepads()).filter((g): g is Gamepad => !!g && g.connected);
+  /**
+   * Which controller drives which player. Single player: the first connected pad (keyboard works too).
+   * Split screen: two pads -> P1 pad 1, P2 pad 2; one pad -> P1 keyboard, P2 the pad.
+   */
+  padFor(player: number): PadState | undefined {
+    const pads = this.pads.connected();
+    if (!this.split) return player === 0 ? pads[0] : undefined;
+    if (pads.length >= 2) return pads[player];
+    return player === 1 ? pads[0] : undefined;
   }
 
-  private padFor(player: number): Gamepad | undefined {
-    const pads = this.pads();
-    const want = this.padForPlayer[player] ?? -1;
-    if (want < 0) return pads[0];
-    return pads.find((p) => p.index === want) ?? (player === 0 ? pads[0] : undefined);
+  /** Poll once per frame: updates gamepad state and edge detection. */
+  poll(dt = 1 / 60): void {
+    this.pads.poll(dt);
+    if (performance.now() - this.pads.lastActivity < 50) this.lastDevice = 'gamepad';
   }
 
-  /** Poll once per frame: updates gamepad edge detection. */
-  poll(): void {
-    for (const p of this.pads()) {
-      const prev = this.prevPad[p.index] ?? [];
-      const now = p.buttons.map((b) => b.pressed);
-      now.forEach((v, i) => {
-        if (v && !prev[i]) this.padEdges.push({ pad: p.index, button: i });
-      });
-      this.prevPad[p.index] = now;
-    }
+  /** Rumble the controller belonging to a player (no-op without a pad or browser support). */
+  rumble(player: number, strong: number, weak: number, ms: number): void {
+    const p = this.padFor(player);
+    if (p) this.pads.rumble(p.index, strong, weak, ms);
   }
 
   kartInput(player: number, dt = 1 / 60): KartInput {
@@ -108,48 +108,28 @@ export class Input {
     this.smoothSteer[player] = s + (keySteer - s) * Math.min(1, dt * rate);
     steer = Math.abs(this.smoothSteer[player]) < 0.02 ? 0 : this.smoothSteer[player];
     if (pad) {
-      const ax = pad.axes[0] ?? 0;
-      if (Math.abs(ax) > DEADZONE) steer = Math.sign(ax) * ((Math.abs(ax) - DEADZONE) / (1 - DEADZONE));
-      const rt = pad.buttons[7]?.value ?? 0;
-      const lt = pad.buttons[6]?.value ?? 0;
-      if (rt > 0.05) throttle += rt;
-      if (lt > 0.1) throttle -= lt;
-      if (pad.buttons[12]?.pressed) throttle = 1;
-      if (pad.buttons[14]?.pressed) steer = -1;
-      if (pad.buttons[15]?.pressed) steer = 1;
-      drift = drift || !!pad.buttons[5]?.pressed || !!pad.buttons[4]?.pressed;
-      useItem = useItem || !!pad.buttons[0]?.pressed;
-      useSpecial = useSpecial || !!pad.buttons[2]?.pressed;
-      rear = rear || !!pad.buttons[3]?.pressed;
+      // Xbox layout: RT gas, LT brake/reverse, left stick (or d-pad) steer, RB/LB drift, A item, X special, Y look back
+      if (pad.lx !== 0) steer = pad.lx;
+      if (pad.buttons[BTN.LEFT]) steer = -1;
+      if (pad.buttons[BTN.RIGHT]) steer = 1;
+      throttle += pad.rt - pad.lt;
+      drift = drift || pad.buttons[BTN.RB] || pad.buttons[BTN.LB];
+      useItem = useItem || pad.buttons[BTN.A];
+      useSpecial = useSpecial || pad.buttons[BTN.X];
+      rear = rear || pad.buttons[BTN.Y];
     }
     throttle = Math.max(-1, Math.min(1, throttle));
     return { throttle, steer, drift, useItem, useSpecial, rearView: rear };
   }
 
-  /** Edge-triggered menu/pause actions since last call. */
-  consumeMenuActions(): Array<'up' | 'down' | 'left' | 'right' | 'confirm' | 'back' | 'pause'> {
-    const out: Array<'up' | 'down' | 'left' | 'right' | 'confirm' | 'back' | 'pause'> = [];
-    for (const code of this.pressedQueue) {
-      if (code === 'Escape' || code === 'KeyP') out.push('pause');
-      if (code === 'Escape' || code === 'Backspace') out.push('back');
-      if (code === 'Enter') out.push('confirm');
-    }
-    for (const e of this.padEdges) {
-      if (e.button === 9) out.push('pause');
-      if (e.button === 0) out.push('confirm');
-      if (e.button === 1) out.push('back');
-      if (e.button === 12) out.push('up');
-      if (e.button === 13) out.push('down');
-      if (e.button === 14) out.push('left');
-      if (e.button === 15) out.push('right');
-    }
+  /** Edge-triggered controller menu actions (buttons + left-stick navigation) since last call. */
+  consumeMenuActions(): Array<{ pad: number; action: MenuAction }> {
     this.pressedQueue = [];
-    this.padEdges = [];
-    return out;
+    return this.pads.consumeMenu();
   }
 
   /** True if any key/pad button was pressed since last consume (used for 'press any key'). */
   anyPressed(): boolean {
-    return this.pressedQueue.length > 0 || this.padEdges.length > 0;
+    return this.pressedQueue.length > 0 || this.pads.anyEdge();
   }
 }

@@ -9,7 +9,7 @@ import { Showroom } from '../render/Showroom';
 import { AIDriver, AI_DIFFICULTY } from '../sim/ai/AIDriver';
 import type { ItemId } from '../sim/types';
 import type { RacerConfig, RaceResult } from '../sim/race/RaceSim';
-import type { CharacterId, Difficulty, KartInput, TrackDef } from '../sim/types';
+import type { CharacterId, Difficulty, KartInput, SimEvent, TrackDef } from '../sim/types';
 import { h, ordinal } from '../ui/dom';
 import { HUD } from '../ui/HUD';
 import { Portraits } from '../ui/Portraits';
@@ -81,6 +81,12 @@ export class Game {
     this.testFlags.laps = Number(params.get('laps') ?? 0);
     this.testFlags.autopilot = params.has('autopilot');
     window.addEventListener('keydown', (e) => this.onKey(e));
+    this.input.pads.onConnectionChange = (n) => {
+      const t = h('div', { class: 'toast-pad' }, n > 0 ? `🎮 Controller connected${n > 1 ? ` (${n})` : ''}` : '🎮 Controller disconnected');
+      document.body.append(t);
+      setTimeout(() => t.remove(), 2500);
+      if (n === 0 && this.session && this.screenName === 'race' && !this.pauseEl) this.togglePause();
+    };
     // unlock audio on the first interaction
     const unlock = () => {
       audio.init().then(() => {
@@ -109,7 +115,8 @@ export class Game {
     const real = (now - this.last) / 1000;
     const dt = Math.min(0.1, real);
     this.last = now;
-    this.input.poll();
+    this.input.poll(dt);
+    this.updateDeviceMode();
     this.handleMenuInput();
     if (this.session) {
       this.session.frame(dt);
@@ -194,11 +201,12 @@ export class Game {
     const el = h('div', { class: 'title-screen' },
       h('div', { class: 'vignette' }),
       h('div', { class: 'logo', html: '<span class="l1">COWGILL</span><span class="l2"><span class="flag">🏁</span> KART RACING <span class="flag">🏁</span></span>' }),
-      h('div', { class: 'press-start' }, 'Press any key or click to start'),
+      h('div', { class: 'press-start' }, '', h('span', { class: 'kb-only' }, 'Press any key or click to start'), h('span', { class: 'pad-only' }, 'Press Ⓐ to start')),
       h('div', { class: 'footer-hint' }, 'Dad · Mom · Brennan · Parker · Lupin · Grandma'),
     );
-    const go = (e: Event) => {
-      e.preventDefault();
+    const go = (e?: Event) => {
+      this.titleGo = null;
+      e?.preventDefault();
       window.removeEventListener('keydown', go);
       el.removeEventListener('pointerdown', go);
       audio.play('menuSelect');
@@ -206,6 +214,7 @@ export class Game {
     };
     window.addEventListener('keydown', go);
     el.addEventListener('pointerdown', go);
+    this.titleGo = go;
     this.show('title', el);
   }
 
@@ -227,7 +236,7 @@ export class Game {
           this.btn('Settings', 'gray small', () => this.showSettings(), 'btn-settings')),
       ),
       h('div', { class: 'corner-stats' }, `Races: ${t.races} · Wins: ${t.wins}`),
-      h('div', { class: 'footer-hint' }, 'Mouse, keyboard (arrows + Enter) or gamepad'),
+      h('div', { class: 'footer-hint' }, h('span', { class: 'kb-only' }, 'Mouse, keyboard (arrows + Enter) or Xbox controller'), h('span', { class: 'pad-only' }, '🎮 Controller connected · D-pad / stick to move · Ⓐ select · Ⓑ back')),
     );
     el.querySelector<HTMLElement>('.menu-list .btn')?.setAttribute('data-autofocus', '');
     this.show('menu', el);
@@ -292,7 +301,7 @@ export class Game {
     const el = h('div', { class: 'char-screen' },
       h('div', { class: 'char-top' },
         h('div', { class: 'screen-title' }, this.mode === 'versus' ? `Player ${playerSlot + 1}: Choose Your Racer` : 'Choose Your Racer'),
-        h('div', { class: 'screen-sub' }, 'Drag the kart to spin it around')),
+        h('div', { class: 'screen-sub' }, h('span', { class: 'kb-only' }, 'Drag the kart to spin it around'), h('span', { class: 'pad-only' }, 'Left stick to choose · Right stick to spin · Ⓐ to pick · Ⓑ back'))),
       info,
       h('div', {},
         cards,
@@ -428,6 +437,7 @@ export class Game {
     this.hud = new HUD(session.sim, session.players, this.portraits, tt, !!ghost);
     session.on((e) => {
       this.hud?.event(e);
+      this.rumbleFor(e);
       if (e.type === 'raceOver') setTimeout(() => this.onRaceOver(), 2500);
     });
     session.setDebug(this.debug);
@@ -691,7 +701,7 @@ export class Game {
         check('Steering assist (younger racers)', 'steeringAssist'),
         check('Show FPS', 'showFps', () => this.updateFpsVisibility()),
         h('h3', {}, 'Controls (Player 1)'), keys, resetKeys,
-        h('div', { style: 'font-size:13px;opacity:0.8;margin-top:8px' }, 'Gamepad: RT gas · LT brake · Left stick steer · RB drift · A item · X special · Y look back · Start pause. Press ` (backquote) for debug mode.'),
+        h('div', { style: 'font-size:13px;opacity:0.8;margin-top:8px' }, 'Xbox controller: RT gas · LT brake · Left stick / D-pad steer · RB or LB drift · Ⓐ item · Ⓧ special · Ⓨ look back · ☰ Menu pause · Ⓑ back. In 2-player, one controller goes to Player 2 (Player 1 uses the keyboard); with two controllers each player gets one. Press ` (backquote) for debug mode.'),
         h('div', { class: 'btn-row', style: 'margin-top:14px' }, this.btn('Done', 'green', () => close(), 'btn-settings-done'))));
     const close = () => {
       modal.remove();
@@ -770,7 +780,10 @@ export class Game {
   }
 
   private moveFocus(dir: number): void {
-    const items = Array.from(this.ui.querySelectorAll<HTMLElement>('.screen [data-nav]:not([disabled]), .modal-bg button')).filter((x) => x.offsetParent !== null);
+    const modals = this.ui.querySelectorAll('.modal-bg');
+    const modal = modals[modals.length - 1];
+    const scope = modal ? Array.from(modal.querySelectorAll<HTMLElement>('button, input, select')) : Array.from(this.ui.querySelectorAll<HTMLElement>('.screen [data-nav]:not([disabled])'));
+    const items = scope.filter((x) => x.offsetParent !== null && !(x as HTMLButtonElement).disabled);
     if (!items.length) return;
     const idx = items.indexOf(document.activeElement as HTMLElement);
     const next = items[(idx + dir + items.length) % items.length];
@@ -778,18 +791,79 @@ export class Game {
     audio.play('menuMove', { volume: 0.5 });
   }
 
+  private titleGo: ((e?: Event) => void) | null = null;
+  private padMode = false;
+
+  /** Switch on-screen prompts between keyboard and Xbox controller glyphs. */
+  private updateDeviceMode(): void {
+    const pad = this.input.lastDevice === 'gamepad';
+    if (pad !== this.padMode) {
+      this.padMode = pad;
+      document.body.classList.toggle('pad-mode', pad);
+    }
+    // right stick spins the kart on the character showroom turntable
+    if (this.stage instanceof Showroom) {
+      const p = this.input.padFor(0);
+      if (p && p.rx !== 0) this.stage.spinBy(p.rx * 0.06);
+    }
+  }
+
+  /** Controller navigation for menus, pause and results (keyboard is handled in onKey). */
   private handleMenuInput(): void {
     const actions = this.input.consumeMenuActions();
     if (!actions.length) return;
-    for (const a of actions) {
-      if (this.session && this.screenName === 'race') {
-        if (a === 'pause' && navigator.getGamepads?.().some((g) => g?.buttons[9]?.pressed)) this.togglePause();
-        if (!this.pauseEl) continue;
+    for (const { action: a } of actions) {
+      if (this.screenName === 'title' && this.titleGo) {
+        if (a === 'confirm' || a === 'pause') this.titleGo();
+        return;
+      }
+      const settings = document.querySelector<HTMLElement>('[data-testid=settings]');
+      if (this.session && this.screenName === 'race' && !settings) {
+        if (a === 'pause') this.togglePause();
+        else if (a === 'back' && this.pauseEl) this.togglePause();
+        if (!this.pauseEl) continue; // racing: face buttons drive the kart, not the menu
+      }
+      const active = document.activeElement;
+      if ((a === 'left' || a === 'right') && active instanceof HTMLInputElement && active.type === 'range') {
+        if (a === 'right') active.stepUp();
+        else active.stepDown();
+        active.dispatchEvent(new Event('input', { bubbles: true }));
+        continue;
       }
       if (a === 'up' || a === 'left') this.moveFocus(-1);
-      if (a === 'down' || a === 'right') this.moveFocus(1);
-      if (a === 'confirm' && navigator.getGamepads?.().some((g) => g?.buttons[0]?.pressed)) (document.activeElement as HTMLElement | null)?.click();
-      if (a === 'back' && navigator.getGamepads?.().some((g) => g?.buttons[1]?.pressed)) this.ui.querySelector<HTMLButtonElement>('[data-testid=btn-back]')?.click();
+      else if (a === 'down' || a === 'right') this.moveFocus(1);
+      else if (a === 'confirm') {
+        const active = document.activeElement as HTMLElement | null;
+        if (active && active !== document.body && this.ui.contains(active)) active.click();
+        else this.moveFocus(1);
+      } else if (a === 'back') {
+        if (settings) settings.querySelector<HTMLButtonElement>('[data-testid=btn-settings-done]')?.click();
+        else this.ui.querySelector<HTMLButtonElement>('[data-testid=btn-back]')?.click();
+      } else if (a === 'pause' && this.screenName === 'menu') {
+        (this.ui.querySelector('[data-testid=btn-quick-race]') as HTMLElement | null)?.click();
+      }
+    }
+  }
+
+  /** Controller rumble for the local players' big moments. */
+  private rumbleFor(e: SimEvent): void {
+    const s = this.session;
+    if (!s) return;
+    const player = (id: number) => s.sim.karts[id]?.playerIndex ?? -1;
+    const buzz = (id: number, strong: number, weak: number, ms: number) => {
+      const p = player(id);
+      if (p >= 0) this.input.rumble(p, strong, weak, ms);
+    };
+    switch (e.type) {
+      case 'hit': buzz(e.kart, 0.9, 0.6, 350); break;
+      case 'wall': if (e.impact > 6) buzz(e.kart, 0.5, 0.3, 120); break;
+      case 'bump': buzz(e.a, 0.3, 0.4, 90); buzz(e.b, 0.3, 0.4, 90); break;
+      case 'land': if (e.impact > 8) buzz(e.kart, 0.4, 0.2, 100); break;
+      case 'boost': buzz(e.kart, 0.15, 0.6, e.kind === 'drift3' || e.kind === 'rocket' ? 450 : 220); break;
+      case 'driftTier': buzz(e.kart, 0, 0.25 + e.tier * 0.15, 80); break;
+      case 'itemGranted': buzz(e.kart, 0, 0.3, 60); break;
+      case 'finish': buzz(e.kart, 0.6, 0.8, 600); break;
+      case 'go': for (const k of s.players) this.input.rumble(k.playerIndex, 0.3, 0.5, 200); break;
     }
   }
 

@@ -213,3 +213,10 @@ button { font-family: var(--font-display); cursor: pointer; }
   .logo { margin-bottom: 2vh; }
 }
 #ui .pass-through .panel, #ui .pass-through button { pointer-events: auto; }
+/* keyboard vs Xbox controller prompts (body.pad-mode is set after controller input) */
+.pad-only { display: none; }
+body.pad-mode .pad-only { display: inline; }
+body.pad-mode .kb-only { display: none; }
+body.pad-mode :focus-visible, body.pad-mode .btn:focus { outline: none; }
+body.pad-mode .btn:focus, body.pad-mode .char-card:focus, body.pad-mode .track-card:focus { transform: translateY(-4px) scale(1.05); box-shadow: 0 0 0 6px rgba(255, 210, 63, 0.9), var(--shadow); }
+.toast-pad { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: rgba(10, 14, 40, 0.85); border: 2px solid #fff; border-radius: 14px; padding: 8px 18px; font-family: var(--font-display); font-size: 18px; z-index: 40; pointer-events: none; animation: screenIn 0.3s; }
