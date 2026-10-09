@@ -287,6 +287,13 @@ export class Track {
     };
   }
 
+  /** True if the main path has a gap within `dist` metres ahead of s (respawn points must have a run-up). */
+  gapAhead(s: number, dist: number): boolean {
+    if (!this.def.gaps.length) return false;
+    for (let d = 0; d <= dist; d += 2) if (this.sampleAt(0, s + d).gap) return true;
+    return false;
+  }
+
   /** Lateral racing-line offset (m) per main-path sample: hug the inside of corners. */
   private computeRacingLine(): Float32Array {
     const main = this.paths[0];

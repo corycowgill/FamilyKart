@@ -314,7 +314,7 @@ export function stepKart(k: KartState, input: KartInput, dt: number, track: Trac
     while (dy < -Math.PI) dy += Math.PI * 2;
     if (Math.abs(dy) < 1.2 && !k.offroad) {
       const back = track.sampleAt(0, q.s - 4);
-      if (!back.gap) k.lastSafe = { pos: { x: back.x + back.nx * q.lateral * 0.5, y: back.y + 0.2, z: back.z + back.nz * q.lateral * 0.5 }, yaw: ty, mainS: q.s - 4, pathId: 0 };
+      if (!back.gap && !track.gapAhead?.(q.s - 4, 35)) k.lastSafe = { pos: { x: back.x + back.nx * q.lateral * 0.5, y: back.y + 0.2, z: back.z + back.nz * q.lateral * 0.5 }, yaw: ty, mainS: q.s - 4, pathId: 0 };
     }
   }
   const trying = Math.abs(input.throttle) > 0.3 && !spinning;
