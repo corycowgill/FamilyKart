@@ -108,9 +108,9 @@ export function buildSweetHome(ctx: SceneryContext): SceneryHandle {
         }
         for (let k = -40; k <= 40; k += 10) placer.reserve(smp.x + smp.nx * k, smp.z + smp.nz * k, 9);
       }
-      // tunnel concrete: warm sodium-tinted, so the underside never picks up the green grass bounce
+      // tunnel concrete: mostly self-lit warm grey, so the hemisphere light's green ground bounce can't tint the ceiling
       {
-        const m = new THREE.Mesh(bag.add(mergeColored(tunnel)), bag.add(new THREE.MeshStandardMaterial({ vertexColors: true, color: '#9a8f86', roughness: 0.9, emissive: '#6a5a2a', emissiveIntensity: 0.6 })));
+        const m = new THREE.Mesh(bag.add(mergeColored(tunnel)), bag.add(new THREE.MeshStandardMaterial({ vertexColors: true, color: '#3c3a36', roughness: 0.95, emissive: '#8f8572', emissiveIntensity: 0.85 })));
         m.castShadow = m.receiveShadow = true;
         m.name = 'lowerWacker';
         group.add(m);
@@ -118,10 +118,10 @@ export function buildSweetHome(ctx: SceneryContext): SceneryHandle {
       // pools of sodium light on the road (one additive mesh)
       {
         const geos: THREE.BufferGeometry[] = [];
-        for (let i = 0; i < lightPos.length; i += 3) geos.push(new THREE.PlaneGeometry(9, 9).rotateX(-Math.PI / 2).translate(lightPos[i], lightPos[i + 1], lightPos[i + 2]));
+        for (let i = 0; i < lightPos.length; i += 3) geos.push(new THREE.PlaneGeometry(13, 13).rotateX(-Math.PI / 2).translate(lightPos[i], lightPos[i + 1], lightPos[i + 2]));
         if (geos.length) {
           const m = new THREE.Mesh(bag.add(mergeGeos(geos)), bag.add(new THREE.MeshBasicMaterial({
-            map: bag.add(dotTexture('rgba(235,230,120,0.5)', 'rgba(235,230,120,0)')), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+            map: bag.add(dotTexture('rgba(240,214,120,0.6)', 'rgba(240,214,120,0)')), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
             polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
           })));
           m.renderOrder = 2;
