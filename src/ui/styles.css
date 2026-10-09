@@ -169,7 +169,7 @@ button { font-family: var(--font-display); cursor: pointer; }
 .tc-line .ns b { font-size: 13px; }
 .track-card .meta span { white-space: nowrap; }
 .tc-line .lnm { display: none; }
-@media (min-width: 1600px), (max-height: 520px) { .tc-line .lnm { display: inline; } }
+@media (max-height: 520px) { .tc-line .lnm { display: inline; } }
 .tc-line .ns b { color: var(--yellow); font-weight: 700; }
 .track-card .meta { font-size: clamp(12px, 1.05vw, 14px); opacity: 0.9; display: flex; justify-content: space-between; gap: 8px; }
 .stars { color: var(--yellow); letter-spacing: 2px; }
