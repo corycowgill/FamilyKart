@@ -1,9 +1,8 @@
-import { countScenery } from './__count_tmp'; // TEMPCOUNT
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { TrackSample } from '../../sim/track/Track';
 import type { SceneryContext, SceneryHandle } from './types';
-import { addClouds, Batch, boxUV, ctxBits, disposeGroup, M, mergeColored, PROPS, setInstance, trimShadows, vcMat } from './common';
+import { addClouds, Batch, boxUV, ctxBits, disposeGroup, M, mergeColored, PROPS, setInstance, timeOfDay, trimShadows, vcMat } from './common';
 import { getField } from './field';
 import { canvasTexture, noiseTexture, textTexture } from './textures';
 import {
@@ -637,7 +636,8 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
       const skyGroup = new THREE.Group();
       skyGroup.name = 'skylineAcrossTheLake';
       group.add(skyGroup);
-      const sky = new Kit(bag, skyGroup, { lit: 0, snow: false, quality });
+      const tod = timeOfDay(group);
+      const sky = new Kit(bag, skyGroup, { lit: tod === 'night' ? 1.1 : tod === 'sunset' ? 0.45 : 0, snow: false, quality });
       const ax = shoreX + 380, az = b.maxZ + 900, bx = shoreX + 980, bz = b.maxZ + 260;
       const at = (f: number) => [ax + (bx - ax) * f, az + (bz - az) * f] as const;
       const len = Math.hypot(bx - ax, bz - az), ang = Math.atan2(bx - ax, bz - az);
@@ -666,7 +666,6 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
     }
   }
 
-  countScenery(group, 'dog-' + quality); // TEMPCOUNT
   return {
     update(dt: number, time: number) {
       for (const u of updaters) u(dt, time);

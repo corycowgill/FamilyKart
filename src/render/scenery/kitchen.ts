@@ -1,11 +1,10 @@
-import { countScenery } from './__count_tmp'; // TEMPCOUNT
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { SceneryContext, SceneryHandle } from './types';
 import { Batch, ctxBits, disposeGroup, M, mergeColored, setInstance, timeOfDay, trimShadows, vcMat } from './common';
 import { getField } from './field';
 import { canvasTexture, dotTexture, drawChicagoFlag, drawChicagoSkyline, star, tileTexture } from './textures';
-import { beam, chicagoHotDog, deepDishPizza, drawGreetingsPoster, drawText, giardinieraJar, italianBeef, Kit, popcornTin } from './chicagoLandmarks';
+import { beam, chicagoHotDog, deepDishPizza, drawGreetingsPoster, drawText, giardinieraJar, italianBeef, Kit, popcornTin, SignAtlas } from './chicagoLandmarks';
 
 type P = Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>;
 
@@ -335,6 +334,40 @@ function drawFridgeArt(g: CanvasRenderingContext2D, w: number, h: number): void 
   magnet(g, 130, h * 0.71 + 6, '#ffd23f');
 }
 
+/** Retro transit poster: an L train curving round the Loop. */
+function drawLPoster(g: CanvasRenderingContext2D, w: number, h: number): void {
+  g.fillStyle = '#00a1de';
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, h * 0.62, w, h * 0.38);
+  // elevated structure + train
+  g.fillStyle = '#3f5a3a';
+  g.fillRect(0, h * 0.5, w, 12);
+  for (let x = 20; x < w; x += 70) g.fillRect(x, h * 0.5, 10, h * 0.12);
+  for (let i = 0; i < 3; i++) {
+    const x = 20 + i * 118;
+    g.fillStyle = '#d4d9df';
+    g.fillRect(x, h * 0.5 - 62, 110, 60);
+    g.fillStyle = '#c60c30';
+    g.fillRect(x, h * 0.5 - 16, 110, 6);
+    g.fillStyle = '#2a3446';
+    for (let k = 0; k < 4; k++) g.fillRect(x + 8 + k * 26, h * 0.5 - 52, 18, 18);
+  }
+  drawChicagoSkyline(g, 0, h * 0.5 - 64, w, h * 0.22, new Rng(5), { tones: ['#66c4ec', '#7fd0f0', '#8ad6f2'], dark: '#0b4f73', glass: '#9fdcf5', windows: 'rgba(255,255,255,0.3)' });
+  drawText(g, 'RIDE THE L!', w, h * 0.16, { fg: '#ffffff', stroke: '#004a73' });
+  g.save();
+  g.translate(0, h * 0.66);
+  drawText(g, 'CHICAGO', w, h * 0.16, { fg: '#c60c30' });
+  g.translate(0, h * 0.16);
+  drawText(g, 'RED - BLUE - BROWN - GREEN\nORANGE - PURPLE - PINK', w, h * 0.14, { fg: '#222222', weight: 700 });
+  g.restore();
+  const lines = ['#c60c30', '#00a1de', '#62361b', '#009b3a', '#f9461c', '#522398', '#e27ea6'];
+  lines.forEach((c, i) => {
+    g.fillStyle = c;
+    g.fillRect((i * w) / 7, h - 14, w / 7 + 1, 14);
+  });
+}
+
 /** Dish towel printed with the Chicago flag, CHICAGO lettering and a fringe. */
 function drawFlagTowel(g: CanvasRenderingContext2D, w: number, h: number): void {
   g.fillStyle = '#ffffff';
@@ -431,8 +464,10 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
   const def = track.def;
   const lm = (kind: string) => def.landmarks.filter((l) => l.kind === kind);
   const updaters: Array<(dt: number, t: number) => void> = [];
-  const kit = new Kit(bag, group, { lit: 0, snow: false, quality, atlas: 2048 });
+  const kit = new Kit(bag, group, { lit: 0, snow: false, quality });
   const tod = timeOfDay(group);
+  /** second atlas for the big wall / fridge art (the kit's own atlas holds the prop labels) */
+  const wallArt = new SignAtlas(2048);
   // keep the Chicago food / props clear of the scattered cutlery and cereal (they are built later)
   const PROP_R: Record<string, number> = { giardiniera: 1.3, deepDish: 1.4, italianBeef: 0.9, chicagoDog: 0.75, popcornTin: 1.9, radio: 1.6, cookbook: 1.6 };
   for (const l of def.landmarks) if (PROP_R[l.kind]) placer.reserve(l.x, l.z, PROP_R[l.kind] * (l.scale ?? 12) + 4);
@@ -521,13 +556,16 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
     const neon = kit.neon.text('SWEET HOME\nCHICAGO', 512, 210, { bg: '#1c1430', fg: '#ff6fb0', bulbs: '#ffe066', stroke: '#41B6E6' });
     kit.solid.push([new THREE.BoxGeometry(236, 100, 4), '#2a1f3d', M.t(cx - 245, 185, cz + R - 3)]);
     kit.neon.quad(neon, 228, 94, M.trs(cx - 245, 185, cz + R - 5.2, 0, Math.PI, 0));
-    const flag = kit.paint.draw(384, 256, (g, w, h) => drawChicagoFlag(g, 0, 0, w, h), 'wallFlag');
-    kit.paint.quad(flag, 180, 120, M.trs(cx + R - 2, 260, cz + 60, 0, -Math.PI / 2, 0));
+    const flag = wallArt.draw(384, 256, (g, w, h) => drawChicagoFlag(g, 0, 0, w, h), 'wallFlag');
+    wallArt.quad(flag, 180, 120, M.trs(cx + R - 2, 260, cz + 60, 0, -Math.PI / 2, 0));
     // "Greetings from Chicago" poster on the south wall, Chicago-flag bunting on the west wall
-    const poster = kit.paint.draw(512, 384, (g, w, hh) => drawGreetingsPoster(g, w, hh), 'greetings');
-    kit.solid.push([new THREE.BoxGeometry(236, 178, 3), '#8a5a2b', M.t(cx - 60, 170, cz - R + 2)]);
-    kit.paint.quad(poster, 224, 168, M.t(cx - 60, 170, cz - R + 3.6));
-    const pennant = kit.paint.draw(128, 128, (g, w, hh) => {
+    const poster = wallArt.draw(512, 384, (g, w, hh) => drawGreetingsPoster(g, w, hh), 'greetings');
+    kit.solid.push([new THREE.BoxGeometry(236, 178, 3), '#8a5a2b', M.t(cx - 60, 118, cz - R + 2)]);
+    wallArt.quad(poster, 224, 168, M.t(cx - 60, 118, cz - R + 3.6));
+    const lPoster = wallArt.draw(384, 512, (g, w, hh) => drawLPoster(g, w, hh), 'lPoster');
+    kit.solid.push([new THREE.BoxGeometry(132, 172, 3), '#2b2b30', M.t(cx + 190, 116, cz - R + 2)]);
+    wallArt.quad(lPoster, 124, 165, M.t(cx + 190, 116, cz - R + 3.6));
+    const pennant = wallArt.draw(128, 128, (g, w, hh) => {
       g.fillStyle = '#ffffff';
       g.beginPath();
       g.moveTo(0, 0);
@@ -543,7 +581,7 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
     for (let i = 0; i < 18; i++) {
       const z = cz - 230 + i * 27;
       const sag = Math.sin((i / 17) * Math.PI) * 18;
-      kit.paint.quad(pennant, 22, 22, M.trs(cx - R + 2, 236 - sag, z, 0, Math.PI / 2, 0));
+      wallArt.quad(pennant, 22, 22, M.trs(cx - R + 2, 236 - sag, z, 0, Math.PI / 2, 0));
     }
     kit.steel.push([new THREE.BoxGeometry(0.6, 0.6, 470), '#f4f4f4', M.t(cx - R + 1.6, 247 - 9, cz + 5)]);
     for (const dz of [-92, 92]) kit.solid.push([new THREE.CylinderGeometry(2, 2, 6, 8).rotateZ(Math.PI / 2), '#c9a227', M.t(cx + R - 3, 322, cz + 60 + dz)]);
@@ -638,11 +676,11 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
     // lower door: horizontal bar handle with the dish towel folded over it
     parts.push([new THREE.BoxGeometry(46, 3, 3), '#9aa5b1', at(14, 116, 39.5)]);
     for (const hx of [-7, 35]) parts.push([new THREE.BoxGeometry(3, 3, 5), '#9aa5b1', at(hx, 116, 37.5)]);
-    const art = kit.paint.draw(512, 1024, (g, w, hh) => drawFridgeArt(g, w, hh), 'fridgeArt');
-    kit.paint.quad(art, 74, 148, at(0, 184, 35.4));
-    const towel = kit.paint.draw(256, 384, (g, w, hh) => drawFlagTowel(g, w, hh), 'flagTowel');
-    kit.paint.quad(towel, 30, 45, at(18, 116 - 22, 41.8, -0.06, 0, 0.03));
-    kit.paint.quad(towel, 30, 6, at(18, 117.6, 39.5, -Math.PI / 2, 0, 0));
+    const art = wallArt.draw(512, 1024, (g, w, hh) => drawFridgeArt(g, w, hh), 'fridgeArt');
+    wallArt.quad(art, 74, 148, at(0, 184, 35.4));
+    const towel = wallArt.draw(256, 384, (g, w, hh) => drawFlagTowel(g, w, hh), 'flagTowel');
+    wallArt.quad(towel, 30, 45, at(18, 116 - 22, 41.8, -0.06, 0, 0.03));
+    wallArt.quad(towel, 30, 6, at(18, 117.6, 39.5, -Math.PI / 2, 0, 0));
     placer.reserve(c.x, c.z, 55);
   }
 
@@ -934,9 +972,9 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
   addMesh(parts, vc);
   addMesh(shiny, vcShiny);
   kit.flush();
+  wallArt.build(bag, group, false, 0.22);
   trimShadows(group, quality);
 
-  countScenery(group, 'kitchen-' + quality); // TEMPCOUNT
   return {
     update(dt: number, time: number) {
       for (const u of updaters) u(dt, time);

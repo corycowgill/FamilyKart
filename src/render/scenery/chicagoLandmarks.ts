@@ -2699,7 +2699,7 @@ export function chicagoHotDog(k: Kit, x: number, y: number, z: number, rot = 0, 
  */
 export function popcornTin(k: Kit, x: number, y: number, z: number, rot = 0, s = 1, rng = new Rng(606)): void {
   const b = M.trs(x, y, z, 0, rot, 0, s);
-  const label = k.paint.draw(1024, 256, (g, w, h) => {
+  const label = k.paint.draw(768, 192, (g, w, h) => {
     const grd = g.createLinearGradient(0, 0, 0, h);
     grd.addColorStop(0, '#1d4f9c');
     grd.addColorStop(1, '#0d2d63');
@@ -2723,7 +2723,7 @@ export function popcornTin(k: Kit, x: number, y: number, z: number, rot = 0, s =
   const lidN = new THREE.Vector3(Math.sin(1.3), Math.cos(1.3), 0);
   const lidC = new THREE.Vector3(1.32, 1.02, 0.25);
   k.gloss.push([new THREE.CylinderGeometry(1.04, 1.04, 0.12, 32), '#1d4f9c', L(b, M.trs(lidC.x, lidC.y, lidC.z, 0, 0, -1.3))]);
-  const lidTop = k.paint.draw(256, 256, (g, w, h) => {
+  const lidTop = k.paint.draw(240, 240, (g, w, h) => {
     g.fillStyle = '#1d4f9c';
     g.fillRect(0, 0, w, h);
     drawChicagoFlag(g, w * 0.12, h * 0.3, w * 0.76, h * 0.4);
@@ -2812,7 +2812,7 @@ export function kites(k: Kit, spots: Array<{ x: number; z: number; h: number }>,
 /** Glass jar of hot giardiniera (veg mosaic under the glass, CHICAGO STYLE label). Radius ~1, height ~2.2 at s = 1. */
 export function giardinieraJar(k: Kit, x: number, y: number, z: number, rot = 0, s = 1): void {
   const b = M.trs(x, y, z, 0, rot, 0, s);
-  const side = k.paint.draw(1024, 256, (g, w, h) => {
+  const side = k.paint.draw(768, 192, (g, w, h) => {
     const r = new Rng(19);
     g.fillStyle = '#c9c46a';
     g.fillRect(0, 0, w, h);

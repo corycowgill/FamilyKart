@@ -194,7 +194,7 @@ export function todLook(def: TrackDef, tod: TimeOfDay): TodLook | null {
     rim: { color: '#7f9cff', intensity: 0.8 },
     grade: { saturation: 1.12, contrast: 1.06, tint: '#f2f4ff', shadowTint: '#ccd6ff', highlightTint: '#fff0d8', vignette: 0.34, exposure: theme === 'snow' ? 1.12 : 1.3, bloomThreshold: theme === 'snow' ? 0.95 : 0.6, bloomStrength: theme === 'snow' ? 0.85 : 1.05 },
     sky: {
-      haze: chicago ? '#4a3a66' : '#2a3466', mid: null, midAmt: 0, discCol: '#e6eeff', disc: 1.5, discCos: 0.99976, moon: true, stars: 1,
+      haze: chicago ? '#4a3a66' : '#2a3466', mid: null, midAmt: 0, discCol: '#e6eeff', disc: 1.15, discCos: 0.99976, moon: true, stars: 1,
       cover: 0.72, cloudLit: '#3c4878', cloudShade: '#121836', glow: 0.25,
     },
     envIntensity: 0.4,
