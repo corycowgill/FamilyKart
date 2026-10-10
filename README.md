@@ -44,7 +44,9 @@ Steering assist for younger racers can be turned on in Settings or on the track-
 - **Grand Prix**: three four-race cups (Windy City, Sweet Home Chicago, Frosty Family) with points (15/12/10/8/6/4) and a podium ceremony.
 - **Time Trial**: race solo against the clock and your saved ghost.
 - **2-Player Versus**: split-screen racing on one computer.
-- **Garage**: browse the karts and your records.
+- **Garage**: browse the karts and your records, and paint your kart with 9 unlockable Chicago paint jobs (Chicago Flag, Windy City, Lower Wacker, Chicago Dog, Blues Club, L Train, Deep Dish, Lake Michigan, The Bean).
+- **Day / Sunset / Night**: pick the time of day on the track screen. Night brings a glowing skyline, Navy Pier fireworks over the lake, street lamps and kart headlights.
+- **Chicago announcer** (browser speech voice) calls the race; switch it off in Settings.
 
 Records, settings, cup results and ghosts are saved in `localStorage`.
 

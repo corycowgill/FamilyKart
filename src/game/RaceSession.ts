@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clamp, wrapAngle } from '../core/math';
 import { audio, type EngineVoice } from '../audio/AudioEngine';
+import { announce, announceIntro, stopAnnouncer } from '../audio/announcer';
 import { characterById } from '../data/characters';
 import type { Input } from '../input/Input';
 import type { GhostData } from '../persist/Save';
@@ -158,6 +159,7 @@ export class RaceSession {
       for (let i = 0; i < 2; i++) this.aiEngines.push({ voice: audio.createEngine(1), kart: -1 });
     }
     audio.startMusic(this.opts.track.music);
+    announceIntro(this.opts.track.name);
   }
 
   private cameraTarget(k: KartState, viewIndex: number) {
@@ -231,6 +233,15 @@ export class RaceSession {
   }
 
   private handleEvent(e: SimEvent): void {
+    if (this.opts.mode !== 'attract') {
+      announce(e, {
+        isLocal: (id) => !!this.sim.karts[id]?.isHuman,
+        name: (id) => characterById(this.sim.karts[id].character).name,
+        place: (id) => this.sim.karts[id]?.place ?? 0,
+        track: this.opts.track.name,
+        laps: this.sim.laps,
+      });
+    }
     const isLocal = (id: number) => this.sim.karts[id]?.isHuman;
     const kpos = (id: number) => this.kartViews[id]?.interpPos;
     switch (e.type) {
@@ -283,7 +294,7 @@ export class RaceSession {
       }
       case 'hit': {
         const vol = this.volFor(e.kart);
-        audio.play('hit', { volume: vol });
+        if (e.cause !== 'wind') audio.play('hit', { volume: vol });
         if (isLocal(e.kart)) {
           this.cameraFor(e.kart)?.addShake(0.8);
           audio.play(this.sim.karts[e.kart].character === 'lupin' ? 'bark' : 'ouch', { volume: 0.8 });
@@ -490,6 +501,7 @@ export class RaceSession {
   }
 
   dispose(): void {
+    stopAnnouncer();
     this.engines.forEach((e) => e.stop());
     this.aiEngines.forEach((e) => e.voice.stop());
     audio.setDrift(false, 0);
