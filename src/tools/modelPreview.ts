@@ -9,6 +9,12 @@
  *   ?freeze=1.3                             simulate exactly N seconds then stop (deterministic screenshots)
  *   ?speed=20                               forward speed (wheel spin, ear flap...)
  *   ?hud=0                                  hide the info overlay
+ *   ?q=low|medium|high                      model quality (which LOD levels get built, default high)
+ *   ?lod=0|1|2                              force a detail level (0 high, 1 medium, 2 low)
+ *   ?lodrow=1                               one racer (?id=) at high / medium / low side by side
+ *   ?livery=chicagoFlag|...                 paint every kart with a livery
+ *   ?campos=x,y,z&look=x,y,z&fov=30         free camera
+ *   ?optimize=1                             merge static meshes like KartView (switches LODs to distance-based)
  *
  * Sets window.__ready = true once something has been rendered and window.__tris to triangle counts.
  */
@@ -17,8 +23,9 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { CHARACTERS, characterById } from '../data/characters';
 import type { CharacterId } from '../sim/types';
 import { buildCharacter } from '../render/models/characterModels';
-import { buildKart } from '../render/models/kartModels';
-import { countTriangles } from '../render/models/materials';
+import { buildKart, setLivery, setModelQuality } from '../render/models/kartModels';
+import type { LiveryId } from '../render/models/liveries';
+import { optimizeKartRig } from '../render/models/optimize';
 import type { CharacterAnimState, CharacterRig, KartRig } from '../render/models/types';
 
 const q = new URLSearchParams(location.search);
@@ -28,6 +35,40 @@ const cam = q.get('cam') ?? 'front';
 const yawParam = q.get('yaw');
 const freeze = q.get('freeze') !== null ? Number(q.get('freeze')) : null;
 const speedParam = q.get('speed') !== null ? Number(q.get('speed')) : null;
+const lodParam = q.get('lod') !== null ? Number(q.get('lod')) : null;
+const lodRow = q.get('lodrow') === '1';
+setModelQuality((q.get('q') as 'low' | 'medium' | 'high' | null) ?? 'high');
+const liveryParam = q.get('livery') as LiveryId | null;
+
+/** Show detail level `lv` (or the closest one built) in every LOD below `root`. */
+function forceLod(root: THREE.Object3D, lv: number): void {
+  root.traverse((o) => {
+    const lod = o as THREE.LOD;
+    if (!lod.isLOD) return;
+    lod.autoUpdate = false;
+    const names = lod.levels.map((l) => Number(l.object.name.replace('lod', '')));
+    let pick = names.indexOf(lv);
+    if (pick < 0) pick = names.reduce((b, n, i) => (Math.abs(n - lv) < Math.abs(names[b] - lv) ? i : b), 0);
+    lod.levels.forEach((l, i) => (l.object.visible = i === pick));
+  });
+}
+
+/** Triangles of what is currently visible (instanced meshes x count). */
+function countTriangles(root: THREE.Object3D): number {
+  let n = 0;
+  const walk = (o: THREE.Object3D) => {
+    if (!o.visible) return;
+    const m = o as THREE.Mesh;
+    if (m.isMesh && m.geometry) {
+      const g = m.geometry;
+      const t = g.index ? g.index.count / 3 : g.attributes.position.count / 3;
+      n += t * ((o as THREE.InstancedMesh).isInstancedMesh ? (o as THREE.InstancedMesh).count : 1);
+    }
+    for (const c of o.children) walk(c);
+  };
+  walk(root);
+  return Math.round(n);
+}
 
 declare global {
   interface Window {
@@ -98,7 +139,8 @@ interface Entry {
   wheelR: number[];
 }
 
-const ids: CharacterId[] = only ? [only] : CHARACTERS.map((c) => c.id);
+const ids: CharacterId[] = lodRow ? [only ?? 'dad', only ?? 'dad', only ?? 'dad'] : only ? [only] : CHARACTERS.map((c) => c.id);
+if (liveryParam) for (const c of CHARACTERS) setLivery(c.id, liveryParam);
 const spacing = 2.9;
 const entries: Entry[] = [];
 const tris: Record<string, number> = {};
@@ -107,6 +149,12 @@ ids.forEach((id, i) => {
   const kart = buildKart(def);
   const char = buildCharacter(id);
   kart.seat.add(char.root);
+  if (q.get('optimize') === '1') {
+    const r = optimizeKartRig(kart, char);
+    console.info(`[optimize] ${id}: ${r.before} -> ${r.after} meshes`);
+  }
+  if (lodRow) forceLod(kart.root, i);
+  else if (lodParam !== null) forceLod(kart.root, lodParam);
   const tt = new THREE.Group();
   if (ids.length > 3) {
     // 3 x 2 grid so every racer is readable
@@ -123,14 +171,15 @@ ids.forEach((id, i) => {
     return Math.max(0.1, (b.max.y - b.min.y) / 2);
   });
   entries.push({ id, turntable: tt, kart, char, wheelR });
-  tris[id] = countTriangles(kart.root);
-  tris[`${id}:character`] = countTriangles(char.root);
+  const key = lodRow ? `${id}:L${i}` : id;
+  tris[key] = countTriangles(kart.root);
+  tris[`${key}:character`] = countTriangles(char.root);
 });
 window.__tris = tris;
 
 // ---- camera ----
 const camera = new THREE.PerspectiveCamera(only ? 32 : 36, window.innerWidth / window.innerHeight, 0.05, 200);
-const single = !!only;
+const single = !!only && !lodRow;
 const look = new THREE.Vector3(0, single ? 0.85 : 0.5, single ? 0 : -0.3);
 switch (cam) {
   case 'chase':
@@ -144,6 +193,16 @@ switch (cam) {
     look.set(0, 1.5, 0);
     camera.fov = 26;
     break;
+  case 'face34':
+    camera.position.set(1.6, 1.85, 1.4);
+    look.set(0, 1.5, 0);
+    camera.fov = 26;
+    break;
+  case 'headback':
+    camera.position.set(-0.8, 2.3, -1.7);
+    look.set(0, 1.55, -0.1);
+    camera.fov = 26;
+    break;
   case 'top':
     camera.position.set(single ? 3.2 : 4, single ? 4.5 : 9, single ? 3.2 : 9);
     break;
@@ -152,6 +211,16 @@ switch (cam) {
     break;
   default:
     camera.position.set(single ? 2.4 : 0, single ? 1.7 : 4.4, single ? 4.0 : 10.5);
+}
+// free camera: ?campos=x,y,z&look=x,y,z&fov=deg
+if (q.get('campos')) {
+  const [x, y, z] = q.get('campos')!.split(',').map(Number);
+  camera.position.set(x, y, z);
+  if (q.get('look')) {
+    const [lx, ly, lz] = q.get('look')!.split(',').map(Number);
+    look.set(lx, ly, lz);
+  }
+  if (q.get('fov')) camera.fov = Number(q.get('fov'));
 }
 camera.lookAt(look);
 camera.updateProjectionMatrix();
@@ -217,7 +286,10 @@ const hud = document.getElementById('hud')!;
 if (q.get('hud') === '0') hud.classList.add('hidden');
 hud.textContent =
   `anim=${anim} cam=${cam}\n` +
-  entries.map((e) => `${e.id.padEnd(8)} kart+driver ${tris[e.id]} tris (driver ${tris[`${e.id}:character`]})`).join('\n');
+  entries.map((e, i) => {
+    const key = lodRow ? `${e.id}:L${i}` : e.id;
+    return `${key.padEnd(8)} kart+driver ${tris[key]} tris (driver ${tris[`${key}:character`]})`;
+  }).join('\n');
 
 let simTime = 0;
 let prevState: CharacterAnimState | null = null;
@@ -238,6 +310,31 @@ function step(dt: number) {
   }
 }
 
+/** Append the detail level each kart's LODs currently show (+ draw calls) to the HUD. */
+function reportLods(): void {
+  const lines = entries.map((e) => {
+    const used = new Map<string, number>();
+    let draws = 0;
+    e.kart.root.traverse((o) => {
+      const lod = o as THREE.LOD;
+      if (lod.isLOD) {
+        const vis = lod.levels.find((l) => l.object.visible);
+        const k = vis ? vis.object.name : 'none';
+        used.set(k, (used.get(k) ?? 0) + 1);
+      }
+    });
+    const walk = (o: THREE.Object3D) => {
+      if (!o.visible) return;
+      if ((o as THREE.Mesh).isMesh) draws++;
+      o.children.forEach(walk);
+    };
+    walk(e.kart.root);
+    const d = camera.position.distanceTo(e.turntable.getWorldPosition(new THREE.Vector3()));
+    return `${e.id.padEnd(8)} dist ${d.toFixed(1)}m  levels ${[...used].map(([k, n]) => `${k}x${n}`).join(' ')}  visible meshes ${draws}  tris ${countTriangles(e.kart.root)}`;
+  });
+  hud.textContent += '\n' + lines.join('\n');
+}
+
 if (freeze !== null) {
   const dt = 1 / 60;
   const n = Math.max(1, Math.round(freeze / dt));
@@ -245,6 +342,7 @@ if (freeze !== null) {
   renderer.render(scene, camera);
   requestAnimationFrame(() => {
     renderer.render(scene, camera);
+    reportLods();
     window.__ready = true;
   });
 } else {

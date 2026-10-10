@@ -4,6 +4,14 @@ import { Rng } from '../../core/rng';
 import type { Track } from '../../sim/track/Track';
 import { getField, type TrackField } from './field';
 import type { SceneryContext } from './types';
+import { facadeDetailMaps, sharedEnv, swayVariant, windDriver, type Sway } from './materials';
+import { acornLamp, lushBush, lushPine, lushTree, parkBench, parkedCar, simpleCar } from './props';
+
+/* ------------------------------------------------------------------ build-wide settings */
+
+export type SceneryQuality = 'low' | 'medium' | 'high';
+/** Quality / time of day of the scenery currently being built (set by ctxBits). */
+export const BUILD: { quality: SceneryQuality; tod: 'day' | 'sunset' | 'night' } = { quality: 'high', tod: 'day' };
 
 /* ------------------------------------------------------------------ disposal */
 
@@ -70,11 +78,59 @@ const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const _e = new THREE.Euler();
 
-/** Collects instance transforms for one geometry/material pair, then builds one InstancedMesh. */
+export interface BatchLod {
+  /** optional middle level used from mid.dist to `dist` */
+  mid?: { geo: THREE.BufferGeometry; dist: number };
+  /** cheaper geometry beyond `dist` (null = nothing) */
+  far?: THREE.BufferGeometry | null;
+  dist?: number;
+  /** draw nothing beyond this distance */
+  cull?: number;
+  /** spatial cell size used to group instances into LOD clusters */
+  cell?: number;
+}
+
+/** Tint-mask variant of a vertex-coloured material (only white vertices take the instance colour). */
+const tintCache = new WeakMap<THREE.Material, THREE.Material>();
+export function tintVariant(base: THREE.Material): THREE.Material {
+  if (!(base instanceof THREE.MeshStandardMaterial)) return base;
+  const k = base.customProgramCacheKey?.() ?? '';
+  if (k.startsWith('tintmask') || k.includes('|tint')) return base;
+  let m = tintCache.get(base);
+  if (m) return m;
+  const mat = base.clone();
+  const prev = base.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    prev?.call(base, sh, r);
+    sh.vertexShader = sh.vertexShader.replace(
+      '#include <color_vertex>',
+      `vColor = vec3(1.0);
+      #ifdef USE_COLOR
+      vColor *= color;
+      #endif
+      #ifdef USE_INSTANCING_COLOR
+      { float tm = step(2.97, color.r + color.g + color.b); vColor.xyz *= mix(vec3(1.0), instanceColor.xyz, tm); }
+      #endif`,
+    );
+  };
+  mat.customProgramCacheKey = () => `${k}|tint`;
+  tintCache.set(base, (m = mat));
+  return m;
+}
+
+/** Material actually used for a geometry: honours userData.tintMask / userData.sway. */
+export function materialFor(geo: THREE.BufferGeometry, mat: THREE.Material): THREE.Material {
+  let m = mat;
+  if (geo.userData.tintMask) m = tintVariant(m);
+  if (geo.userData.sway) m = swayVariant(m, geo.userData.sway as Sway);
+  return m;
+}
+
+/** Collects instance transforms for one geometry/material pair, then builds one InstancedMesh (or LOD clusters). */
 export class Batch {
   readonly mats: THREE.Matrix4[] = [];
   readonly colors: THREE.Color[] = [];
-  constructor(readonly geo: THREE.BufferGeometry, readonly mat: THREE.Material, readonly opts: { cast?: boolean; receive?: boolean; name?: string } = {}) {}
+  constructor(readonly geo: THREE.BufferGeometry, readonly mat: THREE.Material, readonly opts: { cast?: boolean; receive?: boolean; name?: string; lod?: BatchLod } = {}) {}
   add(x: number, y: number, z: number, ry = 0, sx = 1, sy = sx, sz = sx, color?: THREE.ColorRepresentation, rx = 0, rz = 0): this {
     _e.set(rx, ry, rz);
     _q.setFromEuler(_e);
@@ -90,17 +146,68 @@ export class Batch {
   get count(): number {
     return this.mats.length;
   }
-  build(parent: THREE.Object3D): THREE.InstancedMesh | null {
-    if (!this.mats.length) return null;
-    const im = new THREE.InstancedMesh(this.geo, this.mat, this.mats.length);
-    this.mats.forEach((m, i) => im.setMatrixAt(i, m));
-    if (this.colors.some((c) => c.r !== 1 || c.g !== 1 || c.b !== 1)) this.colors.forEach((c, i) => im.setColorAt(i, c));
+  private instanced(geo: THREE.BufferGeometry, idx: number[], offset: THREE.Vector3 | null, parent: THREE.Object3D, tinted: boolean): THREE.InstancedMesh {
+    const im = new THREE.InstancedMesh(geo, materialFor(geo, this.mat), idx.length);
+    const off = offset ? new THREE.Matrix4().makeTranslation(-offset.x, -offset.y, -offset.z) : null;
+    idx.forEach((k, i) => {
+      im.setMatrixAt(i, off ? _m.multiplyMatrices(off, this.mats[k]) : this.mats[k]);
+      if (tinted) im.setColorAt(i, this.colors[k]);
+    });
     im.castShadow = this.opts.cast ?? true;
     im.receiveShadow = this.opts.receive ?? true;
     if (this.opts.name) im.name = this.opts.name;
+    if (geo.userData.sway) windDriver(im);
     im.computeBoundingSphere();
     parent.add(im);
     return im;
+  }
+  build(parent: THREE.Object3D): THREE.InstancedMesh | null {
+    if (!this.mats.length) return null;
+    const tinted = this.colors.some((c) => c.r !== 1 || c.g !== 1 || c.b !== 1);
+    const lod = this.opts.lod ?? (this.geo.userData.lod as BatchLod | undefined);
+    const all = this.mats.map((_, i) => i);
+    if (!lod || (lod.far === undefined && !lod.cull) || this.mats.length < 6) {
+      // LOD helpers are not used: release them
+      if (lod?.far) lod.far.dispose();
+      if (lod?.mid) lod.mid.geo.dispose();
+      return this.instanced(this.geo, all, null, parent, tinted);
+    }
+    // group instances into spatial cells, each a THREE.LOD (near detail -> far / nothing)
+    const cell = lod.cell ?? 120;
+    const cells = new Map<string, number[]>();
+    for (const i of all) {
+      const e = this.mats[i].elements;
+      const key = `${Math.floor(e[12] / cell)},${Math.floor(e[14] / cell)}`;
+      let arr = cells.get(key);
+      if (!arr) cells.set(key, (arr = []));
+      arr.push(i);
+    }
+    let first: THREE.InstancedMesh | null = null;
+    for (const idx of cells.values()) {
+      const c = new THREE.Vector3();
+      for (const i of idx) c.add(_p.setFromMatrixPosition(this.mats[i]));
+      c.divideScalar(idx.length);
+      const node = new THREE.LOD();
+      node.position.copy(c);
+      if (this.opts.name) node.name = `${this.opts.name}-lod`;
+      const near = new THREE.Group();
+      first ??= this.instanced(this.geo, idx, c, near, tinted);
+      if (!near.children.length) this.instanced(this.geo, idx, c, near, tinted);
+      node.addLevel(near, 0);
+      if (lod.mid) {
+        const midG = new THREE.Group();
+        this.instanced(lod.mid.geo, idx, c, midG, tinted);
+        node.addLevel(midG, lod.mid.dist);
+      }
+      if (lod.far) {
+        const farG = new THREE.Group();
+        this.instanced(lod.far, idx, c, farG, tinted);
+        node.addLevel(farG, lod.dist ?? 120);
+      } else if (lod.far === null) node.addLevel(new THREE.Object3D(), lod.dist ?? 120);
+      if (lod.cull) node.addLevel(new THREE.Object3D(), lod.cull);
+      parent.add(node);
+    }
+    return first;
   }
 }
 
@@ -123,6 +230,17 @@ export function vcMat(bag: Bag, opts: THREE.MeshStandardMaterialParameters = {})
  */
 export function windowedMaterial(bag: Bag, map: THREE.Texture, cellW: number, cellH: number, opts: THREE.MeshStandardMaterialParameters = {}): THREE.MeshStandardMaterial {
   const m = bag.add(new THREE.MeshStandardMaterial({ map, roughness: 0.55, metalness: 0.15, ...opts }));
+  const detail = BUILD.quality !== 'low' ? facadeDetailMaps(map, { wallRough: Math.max(0.55, m.roughness), glassRough: 0.08 + m.roughness * 0.15, glassMetal: 0.35 + m.metalness * 0.5, depth: BUILD.quality === 'high' ? 2.6 : 1.8 }) : null;
+  if (detail) {
+    m.normalMap = detail.normal;
+    m.normalScale.set(1, 1);
+    m.roughnessMap = detail.orm;
+    m.metalnessMap = detail.orm;
+    m.roughness = 1;
+    m.metalness = 1;
+    m.envMap = sharedEnv(bag, BUILD.tod !== 'day' || !!opts.emissiveMap);
+    m.envMapIntensity = BUILD.tod === 'night' ? 0.55 : 0.9;
+  }
   m.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader.replace(
       '#include <uv_vertex>',
@@ -140,10 +258,19 @@ export function windowedMaterial(bag: Bag, map: THREE.Texture, cellW: number, ce
         #ifdef USE_EMISSIVEMAP
         vEmissiveMapUv = wuv;
         #endif
+        #ifdef USE_NORMALMAP
+        vNormalMapUv = wuv;
+        #endif
+        #ifdef USE_ROUGHNESSMAP
+        vRoughnessMapUv = wuv;
+        #endif
+        #ifdef USE_METALNESSMAP
+        vMetalnessMapUv = wuv;
+        #endif
       }`,
     );
   };
-  m.customProgramCacheKey = () => `windowed-${cellW}-${cellH}`;
+  m.customProgramCacheKey = () => `windowed-${cellW}-${cellH}${detail ? '-d' : ''}`;
   return m;
 }
 
@@ -167,80 +294,99 @@ export function boxUV(w: number, h: number, d: number, x = 0, y = 0, z = 0): THR
 
 /** Waving flag material (vertex shader sway along uv.x). */
 export function flagMaterial(bag: Bag, map: THREE.Texture, time: { value: number }): THREE.MeshStandardMaterial {
-  const m = bag.add(new THREE.MeshStandardMaterial({ map, side: THREE.DoubleSide, roughness: 0.8 }));
+  const m = bag.add(new THREE.MeshStandardMaterial({ map, side: THREE.DoubleSide, roughness: 0.78 }));
+  // smooth cloth: two travelling waves + a cross ripple, a little droop away from the pole, and
+  // analytic normals so the folds shade softly
+  const wave = `
+        float ph = 0.0;
+        #ifdef USE_INSTANCING
+        ph = instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.21;
+        #endif
+        float fx = uv.x;
+        float w1 = fx * 7.0 - uTime * 6.0 + ph;
+        float w2 = fx * 12.0 + uv.y * 3.5 - uTime * 8.7 + ph * 1.7;
+        float amp = 0.17 * fx + 0.02;
+        float dzv = (sin(w1) * amp + sin(w2) * 0.055 * fx) * smoothstep(0.0, 0.08, fx);
+        float dzdx = (cos(w1) * 7.0 * amp + sin(w1) * 0.17 + cos(w2) * 12.0 * 0.055 * fx) / 2.4;
+        float dzdy = cos(w2) * 3.5 * 0.055 * fx / 1.6;`;
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = time;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nuniform float uTime;')
       .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+        {${wave}
+          objectNormal = normalize(vec3(-dzdx, -dzdy, 1.0) * vec3(1.0, 1.0, sign(objectNormal.z + 1e-4)));
+        }`,
+      )
+      .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-        float ph = 0.0;
-        #ifdef USE_INSTANCING
-        ph = instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.21;
-        #endif
-        transformed.z += sin(uv.x * 7.0 - uTime * 6.0 + ph) * 0.18 * uv.x;
-        transformed.y += sin(uv.x * 5.0 - uTime * 4.0 + ph) * 0.05 * uv.x;`,
+        {${wave}
+          transformed.z += dzv;
+          transformed.y += sin(fx * 5.0 - uTime * 4.0 + ph) * 0.05 * fx - 0.06 * fx * fx;
+        }`,
       );
   };
-  m.customProgramCacheKey = () => 'flag';
+  m.customProgramCacheKey = () => 'flag2';
   return m;
 }
 
 /* ------------------------------------------------------------------ props */
 
+/** Attach LOD hints (used by Batch.build) to a near-detail geometry. */
+function withLod<T extends THREE.BufferGeometry>(near: T, far: THREE.BufferGeometry | null, dist: number, cull?: number): T {
+  near.userData.lod = { far, dist, cull, cell: 110 } satisfies BatchLod;
+  return near;
+}
+let carVariant = 0;
+const farOf = (q: SceneryQuality, hi: number, med: number) => (q === 'high' ? hi : med);
+
+/**
+ * Shared props. Geometry detail follows the quality being built (BUILD.quality): 'high' / 'medium'
+ * get lush multi-lobe foliage, bevelled street furniture and shaped cars with LOD hints (near
+ * detail -> simpler far mesh / culled), 'low' keeps the cheap classic shapes.
+ */
 export const PROPS = {
-  /** Lollipop tree, ~1 unit = 1 m at scale 1 (height ~8). */
+  /** Park tree, ~1 unit = 1 m at scale 1 (height ~8.5). Sways in the wind. */
   roundTree(leaf = '#4caf50', leaf2 = '#66c25a', trunk = '#7a5230'): THREE.BufferGeometry {
-    return mergeColored([
-      [new THREE.CylinderGeometry(0.28, 0.4, 3.2, 6), trunk, M.t(0, 1.6, 0)],
-      [new THREE.IcosahedronGeometry(2.6, 1), leaf, M.trs(0, 5, 0, 0, 0, 0, 1, 0.9, 1)],
-      [new THREE.IcosahedronGeometry(1.7, 0), leaf2, M.t(1.2, 6.2, 0.6)],
-      [new THREE.IcosahedronGeometry(1.6, 0), leaf2, M.t(-1.1, 5.8, -0.8)],
-    ]);
+    const q = BUILD.quality;
+    const seed = (leaf.charCodeAt(2) * 31 + leaf2.charCodeAt(3)) % 97;
+    if (q === 'low') return lushTree(leaf, leaf2, trunk, 'low', { seed });
+    const g = withLod(lushTree(leaf, leaf2, trunk, q, { seed }), lushTree(leaf, leaf2, trunk, q, { seed, far: true }), farOf(q, 160, 95));
+    if (q === 'high') (g.userData.lod as BatchLod).mid = { geo: lushTree(leaf, leaf2, trunk, q, { seed, detail: 1 }), dist: 65 };
+    return g;
   },
   coneTree(leaf = '#2e7d4f', trunk = '#6b4a2b', snow?: string): THREE.BufferGeometry {
-    const parts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [
-      [new THREE.CylinderGeometry(0.25, 0.35, 2, 6), trunk, M.t(0, 1, 0)],
-      [new THREE.ConeGeometry(2.6, 4, 8), leaf, M.t(0, 3.6, 0)],
-      [new THREE.ConeGeometry(2.0, 3.4, 8), leaf, M.t(0, 5.6, 0)],
-      [new THREE.ConeGeometry(1.4, 2.8, 8), leaf, M.t(0, 7.4, 0)],
-    ];
-    if (snow) {
-      parts.push([new THREE.ConeGeometry(1.5, 1.6, 8), snow, M.t(0, 4.6, 0)]);
-      parts.push([new THREE.ConeGeometry(1.1, 1.4, 8), snow, M.t(0, 6.5, 0)]);
-      parts.push([new THREE.ConeGeometry(0.75, 1.3, 8), snow, M.t(0, 8.25, 0)]);
-    }
-    return mergeColored(parts);
+    const q = BUILD.quality;
+    if (q === 'low') return lushPine(leaf, trunk, 'low', snow);
+    return withLod(lushPine(leaf, trunk, q, snow), lushPine(leaf, trunk, q, snow, { far: true }), farOf(q, 150, 95));
   },
   bush(c1 = '#3f8f3a', c2 = '#58a84a'): THREE.BufferGeometry {
-    return mergeColored([
-      [new THREE.IcosahedronGeometry(1.2, 1), c1, M.trs(0, 0.7, 0, 0, 0, 0, 1.2, 0.8, 1)],
-      [new THREE.IcosahedronGeometry(0.9, 1), c2, M.t(0.9, 0.7, 0.3)],
-      [new THREE.IcosahedronGeometry(0.8, 1), c2, M.t(-0.8, 0.6, -0.2)],
-    ]);
+    const q = BUILD.quality;
+    if (q === 'low') return lushBush(c1, c2, 'low');
+    return withLod(lushBush(c1, c2, q), lushBush(c1, c2, 'low'), farOf(q, 110, 70), farOf(q, 260, 180));
   },
   lamp(pole = '#2d3a4a', glow = '#fff3c4'): THREE.BufferGeometry {
-    return mergeColored([
+    const q = BUILD.quality;
+    const classic = () => mergeColored([
       [new THREE.CylinderGeometry(0.12, 0.18, 7, 6), pole, M.t(0, 3.5, 0)],
       [new THREE.BoxGeometry(0.15, 0.15, 1.6), pole, M.t(0, 6.9, 0.7)],
       [new THREE.CylinderGeometry(0.35, 0.45, 0.3, 8), pole, M.t(0, 6.75, 1.4)],
       [new THREE.SphereGeometry(0.3, 8, 6), glow, M.t(0, 6.55, 1.4)],
     ]);
+    if (q === 'low') return classic();
+    return withLod(acornLamp(pole, glow, q), mergeColored([
+      [new THREE.CylinderGeometry(0.1, 0.2, 4.6, 5), pole, M.t(0, 2.3, 0)],
+      [new THREE.SphereGeometry(0.32, 6, 4), glow, M.trs(0, 5.2, 0, 0, 0, 0, 1, 1.4, 1)],
+    ]), farOf(q, 120, 80), farOf(q, 320, 220));
   },
   car(): THREE.BufferGeometry {
-    // body is white (tinted by instance color); glass and tires stay dark
-    const parts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [
-      [new THREE.BoxGeometry(1.9, 0.75, 4.3), '#ffffff', M.t(0, 0.75, 0)],
-      [new THREE.BoxGeometry(1.7, 0.65, 2.2), '#ffffff', M.t(0, 1.45, -0.2)],
-      [new THREE.BoxGeometry(1.72, 0.5, 2.0), '#2a3446', M.t(0, 1.45, -0.2)],
-      [new THREE.BoxGeometry(1.95, 0.2, 0.3), '#d9d9d9', M.t(0, 0.6, 2.15)],
-      [new THREE.BoxGeometry(1.95, 0.2, 0.3), '#d9d9d9', M.t(0, 0.6, -2.15)],
-    ];
-    for (const [x, z] of [[-0.9, 1.35], [0.9, 1.35], [-0.9, -1.35], [0.9, -1.35]]) {
-      parts.push([new THREE.CylinderGeometry(0.38, 0.38, 0.3, 10).rotateZ(Math.PI / 2), '#1c1c1c', M.t(x, 0.38, z)]);
-    }
-    return mergeColored(parts);
+    const q = BUILD.quality;
+    if (q === 'low') return simpleCar();
+    const kinds = ['sedan', 'hatch', 'suv'] as const;
+    return withLod(parkedCar(q, kinds[carVariant++ % 3]), simpleCar(), farOf(q, 110, 70), farOf(q, 400, 260));
   },
   cloud(): THREE.BufferGeometry {
     return mergeColored([
@@ -258,18 +404,22 @@ export const PROPS = {
     ]);
   },
   bench(): THREE.BufferGeometry {
-    return mergeColored([
-      [new THREE.BoxGeometry(2.2, 0.12, 0.6), '#a0703f', M.t(0, 0.55, 0)],
-      [new THREE.BoxGeometry(2.2, 0.5, 0.1), '#a0703f', M.t(0, 0.95, -0.28)],
-      [new THREE.BoxGeometry(0.1, 0.55, 0.5), '#333', M.t(-0.95, 0.27, 0)],
-      [new THREE.BoxGeometry(0.1, 0.55, 0.5), '#333', M.t(0.95, 0.27, 0)],
-    ]);
+    const q = BUILD.quality;
+    if (q === 'low') {
+      return mergeColored([
+        [new THREE.BoxGeometry(2.2, 0.12, 0.6), '#a0703f', M.t(0, 0.55, 0)],
+        [new THREE.BoxGeometry(2.2, 0.5, 0.1), '#a0703f', M.t(0, 0.95, -0.28)],
+        [new THREE.BoxGeometry(0.1, 0.55, 0.5), '#333', M.t(-0.95, 0.27, 0)],
+        [new THREE.BoxGeometry(0.1, 0.55, 0.5), '#333', M.t(0.95, 0.27, 0)],
+      ]);
+    }
+    return withLod(parkBench(), null, farOf(q, 140, 90));
   },
 };
 
 /** Flag cloth plane (pivot at the pole edge), uv.x 0 at pole. */
 export function flagGeometry(w = 2.4, h = 1.6): THREE.BufferGeometry {
-  return new THREE.PlaneGeometry(w, h, 10, 2).translate(w / 2, 0, 0);
+  return new THREE.PlaneGeometry(w, h, BUILD.quality === 'low' ? 8 : 20, BUILD.quality === 'high' ? 8 : 4).translate(w / 2, 0, 0);
 }
 
 /* ------------------------------------------------------------------ placement */
@@ -350,6 +500,8 @@ export class Placer {
 export function ctxBits(ctx: SceneryContext) {
   const bag = new Bag();
   const q = ctx.quality;
+  BUILD.quality = q;
+  BUILD.tod = timeOfDay(ctx.group);
   const density = q === 'high' ? 1 : q === 'medium' ? 0.7 : 0.45;
   return { bag, density, placer: new Placer(ctx.track, ctx.track.def.id.length * 7919 + 13) };
 }

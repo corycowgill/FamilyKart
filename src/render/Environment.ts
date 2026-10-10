@@ -150,7 +150,13 @@ export class Environment {
   private hemiFlash = new THREE.Color();
   private flashAmt = 0;
 
-  constructor(scene: THREE.Scene, authored: TrackDef['lighting'], private quality: Quality, theme?: string, tod: TimeOfDay = 'day', def?: TrackDef) {
+  /** Ultra graphics: 4096 shadow map with a tighter fit around the player */
+  private ultra: boolean;
+  /** warm ground-bounce fill (fake GI) from below on medium/high */
+  readonly bounce: THREE.DirectionalLight | null = null;
+
+  constructor(scene: THREE.Scene, authored: TrackDef['lighting'], private quality: Quality, theme?: string, tod: TimeOfDay = 'day', def?: TrackDef, ultra = false) {
+    this.ultra = ultra && quality === 'high';
     const look = themeLook(theme);
     const tl = def ? todLook(def, tod) : null;
     this.tod = tl;
@@ -208,12 +214,12 @@ export class Environment {
     this.sun.position.copy(this.sunOffset);
     if (quality !== 'low') {
       this.sun.castShadow = true;
-      const size = quality === 'high' ? 2048 : 1024;
+      const size = this.ultra ? 4096 : quality === 'high' ? 2048 : 1024;
       this.sun.shadow.mapSize.set(size, size);
       const cam = this.sun.shadow.camera;
       cam.near = 10;
       cam.far = 600;
-      this.setShadowExtent(quality === 'high' ? 45 : 55);
+      this.setShadowExtent(this.ultra ? 36 : quality === 'high' ? 45 : 55);
       this.sun.shadow.bias = -0.0004;
       this.sun.shadow.normalBias = 0.035;
       // cool sky-coloured rim/back light gives silhouettes some definition (no shadows)
@@ -221,6 +227,11 @@ export class Environment {
         ? new THREE.DirectionalLight(tl.rim.color, tl.rim.intensity)
         : new THREE.DirectionalLight(top.clone().lerp(new THREE.Color('#ffffff'), 0.5), 0.55);
       this.group.add(this.rim, this.rim.target);
+      // stylised bounce light: sunlit ground colour reflected back up onto karts / undersides (cheap GI feel)
+      const nightAmt = tl ? tl.night : 0;
+      const bounceCol = new THREE.Color(lighting.ground).lerp(keyCol, 0.35);
+      this.bounce = new THREE.DirectionalLight(bounceCol, (indoorTheme(theme) ? 0.18 : 0.28) * (1 - nightAmt * 0.85));
+      this.group.add(this.bounce, this.bounce.target);
     }
     this.group.add(this.sun);
     this.group.add(this.sun.target);
@@ -275,7 +286,7 @@ export class Environment {
 
     const center = tmpC.copy(focus);
     if (this.sun.castShadow) {
-      const base = this.quality === 'high' ? 40 : 50;
+      const base = this.ultra ? 30 : this.quality === 'high' ? 40 : 50;
       const ext = base + Math.round(Math.min(1, this.speed / 35) * 4) * 5;
       this.setShadowExtent(ext);
       if (camera) {
@@ -298,6 +309,10 @@ export class Environment {
     }
     this.sun.target.position.copy(center);
     this.sun.position.copy(center).add(this.sunOffset);
+    if (this.bounce) {
+      this.bounce.target.position.copy(focus);
+      this.bounce.position.set(focus.x - this.sunOffset.x * 0.3, focus.y - 40, focus.z - this.sunOffset.z * 0.3);
+    }
     if (this.rim) {
       this.rim.target.position.copy(focus);
       this.rim.position.set(focus.x - this.sunOffset.x, focus.y + this.sunOffset.y * 0.35, focus.z - this.sunOffset.z);
@@ -312,5 +327,6 @@ export class Environment {
   }
 }
 
+const indoorTheme = (t?: string) => t === 'kitchen';
 const tmpC = new THREE.Vector3();
 const tmpF = new THREE.Vector3();

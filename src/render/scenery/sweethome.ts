@@ -1,15 +1,16 @@
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { SceneryContext, SceneryHandle } from './types';
-import { Batch, boxUV, ctxBits, disposeGroup, M, mergeColored, PROPS, setInstance, trimShadows, unitBox, vcMat, windowedMaterial } from './common';
+import { Batch, boxUV, ctxBits, disposeGroup, M, mergeColored, PROPS, setInstance, trimShadows, unitBox, windowedMaterial } from './common';
 import { getField } from './field';
 import { dotTexture, windowTexture } from './textures';
 import {
   aonCenter, ballpark, basculeLeaf, beam, beefStand, bluesClub, buildChicagoFlag, buildGreenRiver, buildLakeMichigan, bannerBatch, chicagoTheatre, cloudGate,
   cornerTavern, CTA, dibsGeo, elevatedL, faceRoad, findSpot, glassSpireTower, hancockCenter, hotDogStand, Kit, lifeguardGeo, marinaCity, pizzeria, popcornShop,
   rooftopTankGeo, sweetHomeBillboard, tribuneTower, twoFlat, bungalow, waterTowerCastle, wavyTower, willisTower, windGusts, wrigleyBuilding, type P,
-  kites, runningDogs,
+  kites, runningDogs, dressBlock, houseBodyMat, streetLife, tireWalls, edgeGrass,
 } from './chicagoLandmarks';
+import { awningParts } from './props';
 
 /**
  * Sweet Home Chicago, the grand tour: the Magnificent Mile (Water Tower, Hancock, shops, the
@@ -310,8 +311,11 @@ export function buildSweetHome(ctx: SceneryContext): SceneryHandle {
   /* ------------------------------------------------ the Magnificent Mile: glossy shops with awnings + planters */
   {
     const kinds = ['glass', 'cream', 'stone', 'blue', 'white', 'tan'] as const;
+    const awnParts: P = [];
+    if (!lo) awningParts(awnParts, 13, 1.7, '#ffffff', '#f4efe2', M.t(0, 4.1, 0.15), quality);
+    else awnParts.push([new THREE.BoxGeometry(13, 0.16, 1.8), '#ffffff', M.trs(0, 3.7, 0.8, 0.35, 0, 0)]);
     const shopGeo = mergeColored([
-      [new THREE.BoxGeometry(13, 0.16, 1.8), '#ffffff', M.trs(0, 3.7, 0.8, 0.35, 0, 0)],
+      ...awnParts,
       [new THREE.BoxGeometry(13.4, 1.0, 0.25), '#ffffff', M.t(0, 4.6, 0.1)],
       [new THREE.BoxGeometry(12.2, 2.8, 0.1), '#cfe8ff', M.t(0, 1.75, 0.06)],
       [new THREE.BoxGeometry(0.3, 3.3, 0.3), '#2a2a2a', M.t(-6.4, 1.65, 0.15)],
@@ -332,6 +336,7 @@ export function buildSweetHome(ctx: SceneryContext): SceneryHandle {
         const w = rng.range(16, 22), d = rng.range(16, 22), h = rng.range(26, 70);
         const kind = rng.pick(kinds);
         kit.facade(kind, boxUV(w, h, d), M.trs(sp.x, sp.y - 0.2, sp.z, 0, sp.yaw, 0));
+        dressBlock(kit, M.trs(sp.x, sp.y - 0.2, sp.z, 0, sp.yaw, 0), w, h, d, { cornice: kind === 'glass' || kind === 'blue' ? '#c9d2dc' : '#e6dfd0', ledge: kind === 'glass' || kind === 'blue' ? undefined : 9, plinth: '#5b5f66', roof: 'mixed', seed: Math.round(sp.x * 7 + sp.z) });
         if (h < 55 && rng.chance(0.4)) kit.solid.push([new THREE.BoxGeometry(w * 0.6, 4, d * 0.6), '#e6e2d8', M.trs(sp.x, sp.y + h, sp.z, 0, sp.yaw, 0)]);
         const fx = sp.x + Math.sin(sp.yaw) * (d / 2 + 0.05), fz = sp.z + Math.cos(sp.yaw) * (d / 2 + 0.05);
         shops.add(fx, sp.y - 0.2, fz, sp.yaw, w / 14, 1, 1, rng.pick(awn));
@@ -344,11 +349,11 @@ export function buildSweetHome(ctx: SceneryContext): SceneryHandle {
   /* ------------------------------------------------ Wrigleyville: two-flats with rooftop bleachers, the alley */
   {
     const tf = twoFlat(), tfFar = twoFlat(true), bg = bungalow();
-    const body = new Batch(bag.add(tf.body), vcMat(bag, { roughness: 0.85 }), { name: 'twoFlats' });
+    const body = new Batch(bag.add(tf.body), houseBodyMat(bag), { name: 'twoFlats' });
     const det = new Batch(bag.add(tf.detail), vc, { name: 'twoFlatDetail' });
     bag.add(tfFar.body);
     const detFar = new Batch(bag.add(tfFar.detail), vc, { name: 'twoFlatDetailFar' });
-    const bBody = new Batch(bag.add(bg.body), vcMat(bag, { roughness: 0.85 }), { name: 'bungalows' });
+    const bBody = new Batch(bag.add(bg.body), houseBodyMat(bag), { name: 'bungalows' });
     const bDet = new Batch(bag.add(bg.detail), vc, { name: 'bungalowDetail' });
     const brick = ['#b5523b', '#a8452f', '#c96f4a', '#d9a36a', '#9c3f2c', '#bdb7aa', '#cfc8b8', '#b86a50'];
     // rooftop bleachers facing the ballpark
@@ -480,6 +485,9 @@ export function buildSweetHome(ctx: SceneryContext): SceneryHandle {
     for (const sp of placer.scatter(Math.round(90 * density), { minX: b.minX - 160, maxX: b.maxX, minZ: b.minZ - 100, maxZ: b.maxZ + 150 }, 3.5, 4)) if (sp.y > -0.5) (rng.chance(0.5) ? treeA : treeB).add(sp.x, sp.y, sp.z, sp.yaw, rng.range(0.9, 1.3));
     for (const sp of placer.along(0, 22, 3.4, 2.4, { from: 160, to: 560 })) treeA.add(sp.x, sp.y, sp.z, sp.yaw, rng.range(1, 1.3));
     if (!lo) windGusts(kit, ['#7cc65a', '#c9e265', '#f2b13c', '#e0882c', '#ffffff'], hi ? 380 : 180, { speed: 10 });
+    tireWalls(kit, placer, 2.6);
+    streetLife(kit, placer, { paths: [0, 1].filter((p) => track.paths[p]), sparse: 1.2 });
+    edgeGrass(kit, placer, { base: '#3f8a34', tip: '#9fd66a', flowers: ['#ffffff', '#ffd23f', '#ff8fc0'], minY: -0.5 });
   }
   {
     const g = new THREE.BufferGeometry();

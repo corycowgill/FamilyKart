@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Rng } from '../../core/rng';
-import { Batch, type Bag, boxUV, flagGeometry, flagMaterial, M, mergeColored, type Placer, PROPS, setInstance, timeOfDay, tintMaskMat, vcMat, windowedMaterial } from './common';
+import { Batch, type Bag, boxUV, BUILD, flagGeometry, flagMaterial, M, mergeColored, type Placer, PROPS, setInstance, timeOfDay, tintMaskMat, vcMat, windowedMaterial } from './common';
+import { crowdMaterial, masonry, sharedEnv } from './materials';
+import { acornLamp, awningParts, bevelBox, ctaShelter, divvyDock, flowerBed, grassTuft, hydrant, lathe, newsBoxes, parkBench, personDetailed, personSimple, tireStack, trashCan } from './props';
 import { canvasTexture, chicagoBannerTexture, cityEnvTexture, dotTexture, drawChicagoFlag, drawChicagoSkyline, flagTexture, windowLitTexture, windowTexture } from './textures';
 
 /**
@@ -216,6 +218,15 @@ const FACADE: Record<FacadeKind, { wall: string; glass: string; glass2: string; 
   cream: { wall: '#f1e6cf', glass: '#3d5470', glass2: '#5b7aa0', frame: 0.3, cell: [8, 11], rough: 0.7, metal: 0.05, seed: 109 },
 };
 
+const MASONRY: Partial<Record<FacadeKind, { size: [number, number]; mortar?: number; mortarColor?: string; jitter?: number; bump?: number }>> = {
+  brick: { size: [0.62, 0.24], mortar: 0.16, mortarColor: '#d8cbb6', jitter: 0.22, bump: 1.4 },
+  rust: { size: [0.62, 0.24], mortar: 0.12, mortarColor: '#8a6a55', jitter: 0.16 },
+  stone: { size: [1.5, 0.62], mortar: 0.08, mortarColor: '#cbbd9f', jitter: 0.08, bump: 1.0 },
+  tan: { size: [1.3, 0.55], mortar: 0.08, mortarColor: '#bfa077', jitter: 0.1 },
+  cream: { size: [1.4, 0.6], mortar: 0.07, mortarColor: '#d9ccb2', jitter: 0.07 },
+  white: { size: [1.1, 0.55], mortar: 0.06, mortarColor: '#dcd8cc', jitter: 0.05, bump: 0.7 },
+};
+
 export interface KitOpts {
   /** window glow at dusk (0 = daytime, ~1 = night) */
   lit: number;
@@ -245,6 +256,9 @@ export class Kit {
   private facMats = new Map<FacadeKind, THREE.MeshStandardMaterial>();
   private batches: Batch[] = [];
   private people: Array<{ m: THREE.Matrix4; c: string }> = [];
+  /** small near-only details, merged per spatial cell and hidden beyond nearDist */
+  private nearCells = new Map<string, { solid: P; gloss: P; steel: P; glow: P; x: number; z: number; n: number }>();
+  readonly nearDist: number;
   constructor(readonly bag: Bag, readonly group: THREE.Group, readonly o: KitOpts) {
     this.paint = new SignAtlas(o.atlas ?? 1024);
     this.solidMat = vcMat(bag, { roughness: 0.78 });
@@ -252,6 +266,42 @@ export class Kit {
     this.steelMat = vcMat(bag, { roughness: 0.2, metalness: 0.7, side: THREE.DoubleSide });
     this.glowMat = bag.add(new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, color: new THREE.Color(1.3, 1.3, 1.3) }));
     this.tintMat = tintMaskMat(bag, { roughness: 0.6 });
+    this.nearDist = o.quality === 'high' ? 300 : 170;
+    if (o.quality !== 'low') {
+      // metals / glossy paint reflect a stylised city sky instead of going flat grey
+      const dusk = o.lit > 0 || BUILD.tod !== 'day';
+      const env = sharedEnv(bag, dusk);
+      for (const [m, k] of [[this.steelMat, 0.9], [this.glossMat, 0.55]] as const) {
+        m.envMap = env;
+        m.envMapIntensity = k * (BUILD.tod === 'night' ? 0.6 : 1);
+      }
+    }
+  }
+  /** Is fine geometric detail built at this quality? */
+  get fine(): boolean {
+    return this.o.quality !== 'low';
+  }
+  /**
+   * Small detail (window frames, rivets, rooftop clutter, street props...) only drawn near the
+   * camera: merged per ~110 m cell into a THREE.LOD that drops it beyond nearDist. Skipped on 'low'.
+   */
+  near(layer: 'solid' | 'gloss' | 'steel' | 'glow', geo: THREE.BufferGeometry, col: THREE.ColorRepresentation, m: THREE.Matrix4): void {
+    if (!this.fine) {
+      geo.dispose();
+      return;
+    }
+    const x = m.elements[12], z = m.elements[14];
+    const key = `${Math.floor(x / 110)},${Math.floor(z / 110)}`;
+    let c = this.nearCells.get(key);
+    if (!c) this.nearCells.set(key, (c = { solid: [], gloss: [], steel: [], glow: [], x: 0, z: 0, n: 0 }));
+    c[layer].push([geo, col, m]);
+    c.x += x;
+    c.z += z;
+    c.n++;
+  }
+  /** Push many parts (same layer) to the near layer. */
+  nearParts(layer: 'solid' | 'gloss' | 'steel' | 'glow', parts: P): void {
+    for (const [g, c, m] of parts) this.near(layer, g, c, m ?? new THREE.Matrix4());
   }
   get q(): Quality {
     return this.o.quality;
@@ -277,6 +327,11 @@ export class Kit {
       Object.assign(extra, { emissive: '#ffffff', emissiveMap: lit, emissiveIntensity: this.o.lit });
     }
     m = windowedMaterial(this.bag, tex, f.cell[0], f.cell[1], extra);
+    if (this.o.quality !== 'low') {
+      // stylised masonry on the wall parts of the facade (chunky bricks / ashlar blocks)
+      const mz = MASONRY[kind];
+      if (mz) masonry(m, { space: 'uv', cell: f.cell, wall: f.wall, ...mz });
+    }
     this.facMats.set(kind, m);
     return m;
   }
@@ -322,20 +377,150 @@ export class Kit {
     this.neon.build(this.bag, this.group, true);
     for (const b of this.batches) b.build(this.group);
     this.batches = [];
+    for (const c of this.nearCells.values()) {
+      const lod = new THREE.LOD();
+      lod.position.set(c.x / c.n, 0, c.z / c.n);
+      lod.name = 'nearDetail';
+      const holder = new THREE.Group();
+      const off = new THREE.Matrix4().makeTranslation(-lod.position.x, 0, -lod.position.z);
+      const layer = (parts: P, mat: THREE.Material, cast: boolean) => {
+        if (!parts.length) return;
+        const geo = this.bag.add(mergeColored(parts.map(([g, col, m]) => [g, col, off.clone().multiply(m ?? new THREE.Matrix4())])));
+        parts.forEach(([g]) => g.dispose());
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.castShadow = cast && this.o.quality === 'high';
+        mesh.receiveShadow = true;
+        mesh.name = 'nearDetail';
+        holder.add(mesh);
+      };
+      layer(c.solid, this.solidMat, true);
+      layer(c.gloss, this.glossMat, true);
+      layer(c.steel, this.steelMat, true);
+      layer(c.glow, this.glowMat, false);
+      lod.addLevel(holder, 0);
+      lod.addLevel(new THREE.Object3D(), this.nearDist);
+      this.group.add(lod);
+    }
+    this.nearCells.clear();
     if (this.people.length) {
-      const mat = tintMaskMat(this.bag, { roughness: 0.75 }, { time: this.time, amp: 0.35, speed: 7 });
-      const im = new THREE.InstancedMesh(this.bag.add(personGeo()), mat, this.people.length);
-      this.people.forEach((p, i) => {
-        im.setMatrixAt(i, p.m);
-        im.setColorAt(i, new THREE.Color(p.c));
-      });
-      im.castShadow = false;
-      im.receiveShadow = false;
-      im.computeBoundingSphere();
-      im.name = 'people';
-      this.group.add(im);
+      const mat = crowdMaterial(this.bag, this.time, { hop: 0.32, speed: 7 });
+      const variants = this.o.quality === 'low' ? 1 : 3;
+      const q = this.o.quality;
+      const groups: Batch[] = [];
+      for (let v = 0; v < variants; v++) {
+        const near = this.bag.add(q === 'low' ? personSimple(v) : personDetailed(v * 2 + 1, q));
+        const far = q === 'low' ? null : this.bag.add(personSimple(v * 2 + 1));
+        groups.push(new Batch(near, mat, { cast: false, receive: false, name: 'people', lod: far ? { far, dist: q === 'high' ? 75 : 45, cull: q === 'high' ? 420 : 260, cell: 90 } : undefined }));
+      }
+      this.people.forEach((p, i) => groups[i % variants].addMatrix(p.m, p.c));
+      groups.forEach((g) => g.build(this.group));
       this.people = [];
     }
+  }
+}
+
+/* ================================================================== building dressing */
+
+/** Wooden rooftop water tank on stilts as parts (base at y = 0). */
+export function tankParts(parts: P, m: THREE.Matrix4, snow = false, seg = 12): void {
+  for (const [lx, lz] of [[-1.3, -1.3], [1.3, -1.3], [-1.3, 1.3], [1.3, 1.3]]) parts.push([new THREE.BoxGeometry(0.25, 3, 0.25), '#3b3b3b', L(m, M.t(lx, 1.5, lz))]);
+  beam(parts, [-1.3, 0.3, -1.3], [1.3, 2.7, 1.3], 0.08, '#3b3b3b', m);
+  beam(parts, [1.3, 0.3, -1.3], [-1.3, 2.7, 1.3], 0.08, '#3b3b3b', m);
+  parts.push([new THREE.CylinderGeometry(2, 2, 0.3, seg), '#3b3b3b', L(m, M.t(0, 3, 0))]);
+  parts.push([new THREE.CylinderGeometry(1.9, 2.0, 3.6, seg), '#8a5a36', L(m, M.t(0, 4.95, 0))]);
+  for (const hy of [3.8, 5.0, 6.2]) parts.push([new THREE.CylinderGeometry(2.04, 2.04, 0.12, seg), '#2f2f2f', L(m, M.t(0, hy, 0))]);
+  parts.push([new THREE.ConeGeometry(2.1, 1.4, seg), snow ? '#f4f8ff' : '#5a3a26', L(m, M.t(0, 7.45, 0))]);
+  parts.push([new THREE.BoxGeometry(0.1, 4, 0.1), '#555', L(m, M.trs(2.0, 5, 0, 0, 0, 0))]);
+}
+
+/** Rooftop HVAC unit (box with a fan grille and ducts) as parts, base at y = 0. */
+export function hvacParts(parts: P, m: THREE.Matrix4, w = 2.6, d = 1.8): void {
+  parts.push([bevelBox(w, 1.2, d, 0.08), '#b9bec5', L(m, M.t(0, 0.6, 0))]);
+  parts.push([new THREE.CylinderGeometry(0.55, 0.55, 0.12, 12), '#5d636b', L(m, M.t(-w * 0.2, 1.24, 0))]);
+  parts.push([new THREE.BoxGeometry(1.1, 0.04, 0.08), '#33373c', L(m, M.trs(-w * 0.2, 1.31, 0, 0, 0.7, 0))]);
+  parts.push([new THREE.BoxGeometry(0.4, 0.5, d * 0.6), '#9aa0a8', L(m, M.t(w * 0.3, 1.4, 0))]);
+  parts.push([new THREE.CylinderGeometry(0.18, 0.18, 1.2, 8).rotateZ(Math.PI / 2), '#a8adb4', L(m, M.t(w / 2 + 0.5, 0.5, 0))]);
+}
+
+/**
+ * Architectural dressing for a box building (w x h x d, base at y = 0, local frame m): a bevelled
+ * cornice with dentils, string-course ledges, a base plinth and rooftop clutter (HVAC, water tank,
+ * antenna). Silhouette pieces go into the always-on solid layer; small parts into the near layer.
+ */
+export function dressBlock(k: Kit, m: THREE.Matrix4, w: number, h: number, d: number, o: { cornice?: string; ledge?: number; plinth?: string; roof?: 'tank' | 'hvac' | 'antenna' | 'mixed' | 'none'; seed?: number; dentils?: boolean } = {}): void {
+  const rng = new Rng(o.seed ?? Math.round(w * 13 + h * 7 + d));
+  const cc = o.cornice ?? '#d9d2c3';
+  k.solid.push([k.fine ? bevelBox(w + 1.0, 1.0, d + 1.0, 0.3) : new THREE.BoxGeometry(w + 1.0, 1.0, d + 1.0), cc, L(m, M.t(0, h + 0.1, 0))]);
+  k.solid.push([new THREE.BoxGeometry(w + 0.5, 0.4, d + 0.5), cc, L(m, M.t(0, h - 0.55, 0))]);
+  if (k.o.snow) k.solid.push([new THREE.BoxGeometry(w + 0.6, 0.35, d + 0.6), '#f4f8ff', L(m, M.t(0, h + 0.75, 0))]);
+  if (o.ledge && k.fine) for (let y = o.ledge; y < h - 3; y += o.ledge) k.solid.push([bevelBox(w + 0.36, 0.32, d + 0.36, 0.1), cc, L(m, M.t(0, y, 0))]);
+  if (o.plinth) k.solid.push([k.fine ? bevelBox(w + 0.5, 1.6, d + 0.5, 0.15) : new THREE.BoxGeometry(w + 0.5, 1.6, d + 0.5), o.plinth, L(m, M.t(0, 0.8, 0))]);
+  if (k.fine && (o.dentils ?? w + d < 90)) {
+    const step = 1.1;
+    for (const [fx, fz, len, ry] of [[0, d / 2 + 0.28, w, 0], [0, -d / 2 - 0.28, w, 0], [w / 2 + 0.28, 0, d, Math.PI / 2], [-w / 2 - 0.28, 0, d, Math.PI / 2]] as const) {
+      for (let t = -len / 2 + 0.5; t < len / 2 - 0.3; t += step) {
+        const lx = ry ? fx : t, lz = ry ? t : fz;
+        k.near('solid', new THREE.BoxGeometry(ry ? 0.45 : 0.4, 0.4, ry ? 0.4 : 0.45), cc, L(m, M.t(lx, h - 0.15, lz)));
+      }
+    }
+  }
+  const roof = o.roof ?? 'mixed';
+  if (roof === 'none' || !k.fine) return;
+  const parts: P = [];
+  const at = (fx: number, fz: number) => L(m, M.trs(fx * w * 0.3, h + 0.6, fz * d * 0.3, 0, rng.next() * 3, 0));
+  if (roof === 'tank' || (roof === 'mixed' && rng.chance(0.45))) tankParts(parts, at(rng.range(-1, 1), rng.range(-1, 1)), k.o.snow, k.q === 'high' ? 12 : 8);
+  if (roof === 'hvac' || roof === 'mixed') for (let i = 0; i < (w * d > 400 ? 3 : 1); i++) hvacParts(parts, at(rng.range(-1, 1), rng.range(-1, 1)));
+  if (roof === 'antenna' || (roof === 'mixed' && rng.chance(0.4))) {
+    const am = at(rng.range(-1, 1), rng.range(-1, 1));
+    parts.push([new THREE.CylinderGeometry(0.06, 0.1, 6, 5), '#c9cdd2', L(am, M.t(0, 3, 0))]);
+    for (const y of [2, 3.5, 5]) parts.push([new THREE.BoxGeometry(1.2, 0.05, 0.05), '#c9cdd2', L(am, M.t(0, y, 0))]);
+    parts.push([new THREE.SphereGeometry(0.6, 8, 4, 0, Math.PI * 2, 0, 1.0), '#e9ecef', L(am, M.trs(0.6, 1.2, 0, 0, 0, -1.1))]);
+  }
+  k.nearParts('solid', parts);
+}
+
+/**
+ * Inset window: recessed glass behind a frame with mullions, a projecting sill and a lintel /
+ * keystone (faces +Z at depth z). `fine` = full detail, else a cheap framed slab.
+ */
+export function winFine(parts: P, x: number, y: number, z: number, w = 1.3, h = 1.7, glass = '#2e4a6b', frame = '#f4f1e8', xf?: THREE.Matrix4, o: { mullion?: boolean; lintel?: string; keystone?: boolean } = {}): void {
+  const t = (mm: THREE.Matrix4) => (xf ? xf.clone().multiply(mm) : mm);
+  const fw = 0.12;
+  parts.push([new THREE.BoxGeometry(w, h, 0.06), glass, t(M.t(x, y, z - 0.08))]);
+  parts.push([new THREE.BoxGeometry(w + fw * 2, fw, 0.16), frame, t(M.t(x, y + h / 2 + fw / 2, z))]);
+  parts.push([new THREE.BoxGeometry(fw, h, 0.16), frame, t(M.t(x - w / 2 - fw / 2, y, z))]);
+  parts.push([new THREE.BoxGeometry(fw, h, 0.16), frame, t(M.t(x + w / 2 + fw / 2, y, z))]);
+  if (o.mullion !== false) {
+    parts.push([new THREE.BoxGeometry(0.06, h, 0.08), frame, t(M.t(x, y, z - 0.04))]);
+    parts.push([new THREE.BoxGeometry(w, 0.06, 0.08), frame, t(M.t(x, y + h * 0.18, z - 0.04))]);
+  }
+  parts.push([bevelBox(w + 0.5, 0.14, 0.34, 0.05), o.lintel ?? frame, t(M.t(x, y - h / 2 - 0.1, z + 0.08))]);
+  if (o.lintel) parts.push([bevelBox(w + 0.44, 0.3, 0.2, 0.06), o.lintel, t(M.t(x, y + h / 2 + 0.28, z + 0.02))]);
+  if (o.keystone) parts.push([bevelBox(0.3, 0.42, 0.26, 0.05), o.lintel ?? frame, t(M.t(x, y + h / 2 + 0.3, z + 0.06))]);
+}
+
+/** Black steel fire escape (landings, railings, ladders) on a wall facing +Z at local z. */
+export function fireEscapeParts(parts: P, xf: THREE.Matrix4, x: number, z: number, floors: number[], w = 3.2): void {
+  const c = '#22262b';
+  const t = (mm: THREE.Matrix4) => xf.clone().multiply(mm);
+  for (const [i, y] of floors.entries()) {
+    parts.push([new THREE.BoxGeometry(w, 0.08, 1.2), c, t(M.t(x, y, z + 0.6))]);
+    parts.push([new THREE.BoxGeometry(w, 0.05, 0.05), c, t(M.t(x, y + 1.0, z + 1.18))]);
+    parts.push([new THREE.BoxGeometry(w, 0.04, 0.04), c, t(M.t(x, y + 0.5, z + 1.18))]);
+    for (const sx of [-1, 1]) parts.push([new THREE.BoxGeometry(0.05, 1.0, 1.2), c, t(M.t(x + sx * w / 2, y + 0.5, z + 0.6))]);
+    for (let k = 0; k <= 6; k++) parts.push([new THREE.BoxGeometry(0.03, 1.0, 0.03), c, t(M.t(x - w / 2 + (k / 6) * w, y + 0.5, z + 1.18))]);
+    parts.push([new THREE.BoxGeometry(0.08, 0.25, 1.1), c, t(M.trs(x - w / 2 + 0.2, y - 0.2, z + 0.6, 0, 0, 0.6))]);
+    // stair to the landing below
+    if (i > 0) {
+      const y0 = floors[i - 1];
+      beam(parts, [x - w / 2 + 0.4, y0 + 0.05, z + 0.85], [x + w / 2 - 0.4, y - 0.05, z + 0.85], 0.06, c, xf, 0.5);
+      beam(parts, [x - w / 2 + 0.4, y0 + 0.9, z + 1.1], [x + w / 2 - 0.4, y + 0.8, z + 1.1], 0.04, c, xf);
+    } else {
+      // drop ladder
+      for (const lx of [-0.25, 0.25]) parts.push([new THREE.BoxGeometry(0.04, 2.2, 0.04), c, t(M.t(x + w / 2 - 0.6 + lx, y - 1.1, z + 1.0))]);
+      for (let r = 0; r < 6; r++) parts.push([new THREE.BoxGeometry(0.5, 0.03, 0.03), c, t(M.t(x + w / 2 - 0.6, y - 0.2 - r * 0.35, z + 1.0))]);
+    }
+    for (const sx of [-1, 1]) beam(parts, [x + sx * w * 0.4, y - 0.05, z + 1.1], [x + sx * w * 0.4, y - 0.9, z + 0.05], 0.05, c, xf);
   }
 }
 
@@ -363,7 +548,25 @@ export function willisTower(k: Kit, x: number, y: number, z: number, rot = 0, s 
     for (const by of [88, 176]) if (h > by + 10) k.solid.push([new THREE.BoxGeometry(u + 0.3, 2.6, u + 0.3), '#111317', L(b, M.t(i * u, by, j * u))]);
     if (k.o.snow) k.solid.push([new THREE.BoxGeometry(u - 0.2, 0.7, u - 0.2), '#f4f8ff', L(b, M.t(i * u, h + 0.35, j * u))]);
   }
+  // dark-glass lobby podium + rooftop mechanical penthouses on the tallest tubes
+  k.solid.push([k.fine ? bevelBox(3 * u + 3, 8, 3 * u + 3, 0.6) : new THREE.BoxGeometry(3 * u + 3, 8, 3 * u + 3), '#1a1d22', L(b, M.t(0, 4, 0))]);
+  if (k.fine) {
+    for (const [i, j] of [[0, 0], [0, 1]]) {
+      k.solid.push([bevelBox(u - 3, 4, u - 3, 0.3), '#2a2d33', L(b, M.t(i * u, 270 + 2, j * u))]);
+      const rp: P = [];
+      hvacParts(rp, L(b, M.t(i * u - 2, 274, j * u + 2)), 3, 2.2);
+      k.nearParts('solid', rp);
+    }
+    // vertical mullion fins catch the light on the black tubes
+    for (const [i, j, h] of tubes) for (const [fx, fz, ry] of [[-u / 2 - 0.12, 0, Math.PI / 2], [u / 2 + 0.12, 0, Math.PI / 2], [0, -u / 2 - 0.12, 0], [0, u / 2 + 0.12, 0]] as const) {
+      for (let t = -u / 2 + u / 6; t < u / 2 - 0.1; t += u / 3) {
+        const lx = ry ? fx : t, lz = ry ? t : fz;
+        k.solid.push([new THREE.BoxGeometry(ry ? 0.25 : 0.3, h - 10, ry ? 0.3 : 0.25), '#0e1013', L(b, M.t(i * u + lx, 8 + (h - 10) / 2, j * u + lz))]);
+      }
+    }
+  }
   for (const [ax, az, ah] of [[-3, -3, 74], [3, u + 3, 64]]) {
+    if (k.fine) for (let y = 12; y < ah - 6; y += 12) k.near('gloss', new THREE.BoxGeometry(2.6, 0.25, 0.25), '#dddddd', L(b, M.t(ax, 270 + y, az)));
     k.gloss.push([new THREE.CylinderGeometry(0.7, 1.4, ah, 6), '#f4f4f4', L(b, M.t(ax, 270 + ah / 2, az))]);
     k.glow.push([new THREE.SphereGeometry(1.2, 6, 4), '#ff2a2a', L(b, M.t(ax, 270 + ah, az))]);
   }
@@ -434,18 +637,44 @@ export function wavyTower(k: Kit, x: number, y: number, z: number, rot = 0, s = 
 /** Tribune Tower: limestone shaft with a gothic octagonal crown and flying buttresses. */
 export function tribuneTower(k: Kit, x: number, y: number, z: number, rot = 0, s = 1): void {
   const b = M.trs(x, y, z, 0, rot, 0, s);
-  const st = '#e8dcc2';
+  const st = '#e8dcc2', st2 = '#d8cbb0', dk = '#3a4458';
+  const seg = k.q === 'high' ? 16 : 8;
   k.facade('stone', boxUV(24, 92, 20), b);
   k.facade('stone', boxUV(18, 12, 15, 0, 92, 0), b);
-  k.solid.push([new THREE.CylinderGeometry(7.5, 8.2, 16, 8), st, L(b, M.t(0, 112, 0))]);
-  k.solid.push([new THREE.CylinderGeometry(5, 7, 7, 8), '#d8cbb0', L(b, M.t(0, 123.5, 0))]);
+  // vertical piers running up the shaft (gothic verticality)
+  if (k.fine) for (const [fx, fz, len, ry] of [[0, 10.15, 24, 0], [0, -10.15, 24, 0], [12.15, 0, 20, 1], [-12.15, 0, 20, 1]] as const) {
+    for (let t = -len / 2 + 2; t <= len / 2 - 2; t += 4) {
+      const lx = ry ? fx : t, lz = ry ? t : fz;
+      k.solid.push([new THREE.BoxGeometry(ry ? 0.45 : 0.55, 90, ry ? 0.55 : 0.45), st, L(b, M.t(lx, 46, lz))]);
+    }
+  }
+  dressBlock(k, b, 24, 92, 20, { cornice: st2, roof: 'none', dentils: true });
+  // crown: octagonal lantern drum with tracery, flying buttresses ending in pinnacles
+  k.solid.push([lathe([[8.6, 0], [8.2, 1], [7.6, 1.4], [7.6, 15], [8.3, 15.6], [8.3, 16.4], [6.8, 17]], 8), st, L(b, M.trs(0, 104, 0, 0, Math.PI / 8, 0))]);
+  k.solid.push([new THREE.CylinderGeometry(5, 7, 7, 8), st2, L(b, M.t(0, 123.5, 0))]);
   k.solid.push([new THREE.ConeGeometry(4.5, 6, 8), '#cfc2a6', L(b, M.t(0, 130, 0))]);
+  k.solid.push([new THREE.ConeGeometry(0.6, 4, 6), '#cfc2a6', L(b, M.t(0, 134.5, 0))]);
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
     const cx = Math.cos(a), cz = Math.sin(a);
     beam(k.solid, [cx * 12.5, 102, cz * 10.5], [cx * 8.2, 117, cz * 8.2], 0.9, st, b);
+    if (k.fine) beam(k.solid, [cx * 11.8, 104, cz * 10], [cx * 8.2, 112, cz * 8.2], 0.5, st2, b);
     k.solid.push([new THREE.ConeGeometry(0.9, 5, 4), st, L(b, M.t(cx * 8.4, 122, cz * 8.4))]);
-    k.solid.push([new THREE.BoxGeometry(0.5, 7, 0.5), '#3a4458', L(b, M.t(cx * 7.6, 112, cz * 7.6))]);
+    // pinnacles on the buttress feet and on the crown ring
+    k.solid.push([new THREE.CylinderGeometry(0.7, 0.8, 3, 4), st, L(b, M.t(cx * 12.3, 103.5, cz * 10.3))]);
+    k.solid.push([new THREE.ConeGeometry(0.75, 4.2, 4), st, L(b, M.t(cx * 12.3, 107, cz * 10.3))]);
+    // tall lancet windows between the drum piers
+    const a2 = a + Math.PI / 8;
+    k.solid.push([new THREE.BoxGeometry(1.6, 10, 0.3), dk, L(b, M.trs(Math.cos(a2) * 7.5, 111, Math.sin(a2) * 7.5, 0, -a2 + Math.PI / 2, 0))]);
+    if (k.fine) {
+      k.solid.push([new THREE.ConeGeometry(0.8, 1.6, 4).rotateY(Math.PI / 4), dk, L(b, M.trs(Math.cos(a2) * 7.5, 116.8, Math.sin(a2) * 7.5, 0, -a2 + Math.PI / 2, 0, 1, 1, 0.2))]);
+      k.near('solid', new THREE.BoxGeometry(0.12, 10, 0.4), st, L(b, M.trs(Math.cos(a2) * 7.62, 111, Math.sin(a2) * 7.62, 0, -a2 + Math.PI / 2, 0)));
+      k.solid.push([new THREE.ConeGeometry(0.5, 3.2, 4), st, L(b, M.t(cx * 7.3, 126, cz * 7.3))]);
+    }
+  }
+  if (k.fine) for (let i = 0; i < seg; i++) {
+    const a = (i / seg) * Math.PI * 2;
+    k.near('solid', new THREE.BoxGeometry(0.6, 0.9, 0.5), st2, L(b, M.trs(Math.cos(a) * 8.4, 120.6, Math.sin(a) * 8.4, 0, -a, 0)));
   }
   if (k.o.snow) k.solid.push([new THREE.BoxGeometry(17.5, 0.6, 14.5), '#f4f8ff', L(b, M.t(0, 104.3, 0))]);
 }
@@ -462,6 +691,26 @@ export function wrigleyBuilding(k: Kit, x: number, y: number, z: number, rot = 0
   k.solid.push([new THREE.CylinderGeometry(5, 6, 9, 8), w, L(b, M.t(0, 84.5, 0))]);
   k.solid.push([new THREE.CylinderGeometry(3, 4, 6, 8), w, L(b, M.t(0, 92, 0))]);
   k.solid.push([new THREE.ConeGeometry(3, 9, 8), '#efe6d2', L(b, M.t(0, 99.5, 0))]);
+  dressBlock(k, b, 34, 54, 22, { cornice: '#f1ebdf', roof: 'none', ledge: 18, plinth: '#e6dfcf' });
+  dressBlock(k, L(b, M.t(34, 0, 2)), 24, 34, 18, { cornice: '#f1ebdf', roof: 'hvac', plinth: '#e6dfcf' });
+  if (k.fine) {
+    // colonnade ring around the clock tower's upper tiers + corner finials + balustrade
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      k.solid.push([new THREE.CylinderGeometry(0.35, 0.4, 8, 8), w, L(b, M.t(Math.cos(a) * 5.6, 84.5, Math.sin(a) * 5.6))]);
+    }
+    k.solid.push([lathe([[6.6, 0], [6.6, 0.5], [6.1, 0.8], [6.1, 1.2], [6.5, 1.5]], 16), '#efe6d2', L(b, M.t(0, 79.6, 0))]);
+    k.solid.push([lathe([[6.3, 0], [6.3, 0.6], [5.0, 1.2]], 16), '#efe6d2', L(b, M.t(0, 88.8, 0))]);
+    for (const [cx, cz] of [[-7, -7], [7, -7], [-7, 7], [7, 7]]) {
+      k.solid.push([new THREE.CylinderGeometry(0.5, 0.6, 3, 8), w, L(b, M.t(cx, 71.5, cz))]);
+      k.solid.push([new THREE.ConeGeometry(0.6, 2, 8), '#efe6d2', L(b, M.t(cx, 74, cz))]);
+      k.solid.push([new THREE.SphereGeometry(0.5, 8, 6), w, L(b, M.t(cx * 0.86, 81, cz * 0.86))]);
+    }
+    for (let i = -6; i <= 6; i += 1.2) for (const [fx, fz, ry] of [[i, 7.2, 0], [i, -7.2, 0], [7.2, i, 1], [-7.2, i, 1]] as const) {
+      k.near('solid', new THREE.CylinderGeometry(0.12, 0.16, 0.9, 6), w, L(b, M.t(fx, 70.5, fz)));
+      void ry;
+    }
+  }
   const clock = k.paint.draw(128, 128, (g, cw, ch) => {
     g.fillStyle = '#f7f1e3';
     g.fillRect(0, 0, cw, ch);
@@ -524,6 +773,26 @@ export function waterTowerCastle(k: Kit, x: number, y: number, z: number, rot = 
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
       k.solid.push([new THREE.BoxGeometry(0.8, h * 0.45, 0.25), dk, L(b, M.trs(Math.cos(a) * r * 0.97, y0 + h * 0.55, Math.sin(a) * r * 0.97, 0, -a + Math.PI / 2, 0))]);
+    }
+  }
+  if (k.fine) {
+    // battlements on the turrets, arched lancets on the shaft, buttress ribs
+    for (const [cx, cz] of [[-8, -8], [8, -8], [-8, 8], [8, 8]]) for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      k.solid.push([bevelBox(0.6, 0.8, 0.6, 0.12), st, L(b, M.t(cx + Math.cos(a) * 1.75, 15.3, cz + Math.sin(a) * 1.75))]);
+    }
+    for (const [r, h, y0] of tiers) for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+      k.solid.push([new THREE.BoxGeometry(0.45, h * 0.95, 0.5), '#e2cf98', L(b, M.trs(Math.cos(a) * r * 0.98, y0 + h / 2, Math.sin(a) * r * 0.98, 0, -a, 0))]);
+      const a2 = a - Math.PI / 8;
+      k.near('solid', new THREE.ConeGeometry(0.45, 0.9, 4).rotateY(Math.PI / 4), dk, L(b, M.trs(Math.cos(a2) * r * 0.99, y0 + h * 0.79, Math.sin(a2) * r * 0.99, 0, -a2 + Math.PI / 2, 0, 1, 1, 0.3)));
+    }
+    for (const [sx, sz, ry] of [[0, 8.1, 0], [0, -8.1, 0], [8.1, 0, Math.PI / 2], [-8.1, 0, Math.PI / 2]] as const) {
+      k.solid.push([new THREE.ConeGeometry(1.7, 1.6, 4).rotateY(Math.PI / 4), st, L(b, M.trs(sx, 7.6, sz, 0, ry, 0, 1, 1, 0.3))]);
+      for (const wx of [-4.5, 4.5]) {
+        k.near('solid', new THREE.BoxGeometry(1.1, 2.6, 0.2), dk, L(b, M.trs(sx + (ry ? 0 : wx), 6.2, sz + (ry ? wx : 0), 0, ry, 0)));
+        k.near('solid', new THREE.ConeGeometry(0.6, 0.8, 4).rotateY(Math.PI / 4), dk, L(b, M.trs(sx + (ry ? 0 : wx), 7.8, sz + (ry ? wx : 0), 0, ry, 0, 1, 1, 0.2)));
+      }
     }
   }
   k.solid.push([new THREE.CylinderGeometry(1.4, 2.6, 6, 8), roof, L(b, M.t(0, 45, 0))]);
@@ -600,7 +869,7 @@ export function marinaCity(k: Kit, x: number, y: number, z: number, rot = 0, s =
 
 /** Cloud Gate ("the Bean"): mirror-chrome blob with the omphalos arch, on a granite plaza. */
 export function cloudGate(k: Kit, x: number, y: number, z: number, rot = 0, s = 1): THREE.Mesh {
-  const g = new THREE.SphereGeometry(1, 72, 36);
+  const g = k.q === 'high' ? new THREE.SphereGeometry(1, 128, 64) : k.q === 'medium' ? new THREE.SphereGeometry(1, 80, 40) : new THREE.SphereGeometry(1, 48, 24);
   const pos = g.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {
     const px = pos.getX(i), pz = pos.getZ(i);
@@ -860,6 +1129,14 @@ export function artMuseum(k: Kit, x: number, y: number, z: number, rot = 0, s = 
   const b = M.trs(x, y, z, 0, rot, 0, s);
   const st = '#efe8d8';
   k.facade('cream', boxUV(64, 15, 30, 0, 0, -6), b);
+  if (k.fine) {
+    dressBlock(k, L(b, M.t(0, 0, -6)), 64, 15, 30, { cornice: '#e3dbc8', roof: 'hvac', plinth: '#d6cdb9', dentils: true });
+    // fluted column capitals / bases
+    for (let i = 0; i < 6; i++) {
+      k.solid.push([bevelBox(2.1, 0.5, 2.1, 0.12), st, L(b, M.t(-10 + i * 4, 14.2, 11.5))]);
+      k.solid.push([bevelBox(2.1, 0.5, 2.1, 0.12), st, L(b, M.t(-10 + i * 4, 3.75, 11.5))]);
+    }
+  }
   k.solid.push([new THREE.BoxGeometry(66, 1.6, 32), '#e3dbc8', L(b, M.t(0, 15.6, -6))]);
   // portico
   for (let i = 0; i < 6; i++) k.solid.push([new THREE.CylinderGeometry(0.75, 0.85, 11, 10), st, L(b, M.t(-10 + i * 4, 3.5 + 5.5, 11.5))]);
@@ -975,6 +1252,7 @@ export function chicagoTheatre(k: Kit, x: number, y: number, z: number, rot: num
   const b = M.trs(x, y, z, 0, rot, 0);
   // building
   k.facade('cream', boxUV(36, 24, 18, 0, 0, -9), b);
+  if (k.fine) dressBlock(k, L(b, M.t(0, 0, -9)), 36, 24, 18, { cornice: '#d8c9a8', roof: 'mixed', ledge: 8, plinth: '#8a6a50' });
   k.solid.push([new THREE.BoxGeometry(37, 1.4, 19), '#d8c9a8', L(b, M.t(0, 24.4, -9))]);
   k.solid.push([new THREE.BoxGeometry(15, 13, 0.6), '#4a2e1c', L(b, M.t(0, 10.5, 0.05))]);
   k.solid.push([new THREE.CylinderGeometry(7.5, 7.5, 0.6, 16, 1, false, -Math.PI / 2, Math.PI).rotateX(Math.PI / 2), '#4a2e1c', L(b, M.t(0, 17, 0.05))]);
@@ -1016,7 +1294,8 @@ export function hotDogStand(k: Kit, x: number, y: number, z: number, rot = 0, s 
   k.solid.push([new THREE.BoxGeometry(5.6, 1.5, 0.2), '#2b1d12', L(b, M.t(0, 2.1, 2.32))]);
   k.solid.push([new THREE.BoxGeometry(6.2, 0.2, 0.9), '#c0c0c0', L(b, M.t(0, 1.35, 2.6))]);
   k.solid.push([new THREE.BoxGeometry(7.4, 0.4, 5), '#c8102e', L(b, M.t(0, 3.6, 0))]);
-  for (let i = 0; i < 7; i++) k.solid.push([new THREE.BoxGeometry(1.0, 0.12, 1.6), i % 2 ? '#ffffff' : '#c8102e', L(b, M.trs(-3 + i, 3.15, 3.0, 0.4, 0, 0))]);
+  if (k.fine) awningParts(k.solid, 7.2, 1.6, '#c8102e', '#ffffff', L(b, M.t(0, 3.55, 2.3)), k.q);
+  else for (let i = 0; i < 7; i++) k.solid.push([new THREE.BoxGeometry(1.0, 0.12, 1.6), i % 2 ? '#ffffff' : '#c8102e', L(b, M.trs(-3 + i, 3.15, 3.0, 0.4, 0, 0))]);
   // the giant dog: poppy-seed bun, red-hot frank, mustard zigzag, relish, tomatoes, pickle, peppers
   const d = L(b, M.trs(0, 4.9, 0, 0, 0, 0.08));
   for (const bz of [-0.55, 0.55]) k.solid.push([new THREE.CapsuleGeometry(0.75, 4.6, 4, 10).rotateZ(Math.PI / 2), '#e9b66b', L(d, M.trs(0, 0, bz, 0, 0, 0, 1, 0.85, 0.9))]);
@@ -1064,7 +1343,11 @@ export function pizzeria(k: Kit, x: number, y: number, z: number, rot = 0, s = 1
   k.facade('brick', boxUV(11, 6.5, 8, 0, 0, -4), b);
   k.solid.push([new THREE.BoxGeometry(11.4, 0.6, 8.4), '#e9dcc4', L(b, M.t(0, 6.8, -4))]);
   k.solid.push([new THREE.BoxGeometry(8, 2.4, 0.2), '#ffe7a8', L(b, M.t(0, 1.9, 0.02))]);
-  for (let i = 0; i < 9; i++) k.solid.push([new THREE.BoxGeometry(1.25, 0.12, 1.6), ['#1f8f3a', '#ffffff', '#c8102e'][i % 3], L(b, M.trs(-5 + i * 1.25, 3.6, 0.7, 0.45, 0, 0))]);
+  if (k.fine) {
+    awningParts(k.solid, 11.2, 1.5, '#1f8f3a', '#ffffff', L(b, M.t(0, 4.05, 0.05)), k.q);
+    dressBlock(k, L(b, M.t(0, 0, -4)), 11, 6.5, 8, { cornice: '#e9dcc4', roof: 'hvac', plinth: '#7d6a58' });
+    for (const wx of [-4.3, 4.3]) winFine(k.solid, wx, 1.9, 0.05, 1.3, 2.2, '#2b4566', '#3b2b20', b, { lintel: '#e9dcc4' });
+  } else for (let i = 0; i < 9; i++) k.solid.push([new THREE.BoxGeometry(1.25, 0.12, 1.6), ['#1f8f3a', '#ffffff', '#c8102e'][i % 3], L(b, M.trs(-5 + i * 1.25, 3.6, 0.7, 0.45, 0, 0))]);
   const p = L(b, M.trs(0, 7.2, -3, -0.35, 0, 0));
   k.solid.push([new THREE.CylinderGeometry(2.8, 2.6, 1.3, 20), '#d99a4e', L(p, M.t(0, 0.65, 0))]);
   k.solid.push([new THREE.CylinderGeometry(2.45, 2.45, 0.2, 20), '#c7321f', L(p, M.t(0, 1.32, 0))]);
@@ -1239,9 +1522,24 @@ export function elevatedL(k: Kit, placer: Placer, o: LOpts): void {
     s.push([new THREE.BoxGeometry(len, 0.4, 0.4), steel, P2(len / 2, deckY - 1.5, side)]);
     for (let x = 0; x < len; x += step) {
       s.push([new THREE.BoxGeometry(0.25, 2.0, 0.25), steel, P2(x, deckY - 0.5, side)]);
-      if (x + step <= len) beam(s, [x, deckY - 1.4, side], [x + step, deckY + 0.4, side], 0.18, steel, base);
+      if (x + step <= len) {
+        beam(s, [x, deckY - 1.4, side], [x + step, deckY + 0.4, side], 0.18, steel, base);
+        // second diagonal -> riveted X lattice
+        if (k.q === 'high') beam(s, [x, deckY + 0.4, side], [x + step, deckY - 1.4, side], 0.14, steel, base);
+      }
+      if (k.fine) {
+        // gusset plates at the lattice joints + rivet heads along the chords
+        const out = Math.sign(side) * 0.22;
+        k.near('solid', new THREE.BoxGeometry(0.9, 0.7, 0.05), steelD, P2(x, deckY + 0.3, side + out));
+        k.near('solid', new THREE.BoxGeometry(0.9, 0.7, 0.05), steelD, P2(x, deckY - 1.3, side + out));
+        if (k.q === 'high') for (const ry of [deckY + 0.62, deckY + 0.38, deckY - 1.38, deckY - 1.62]) for (let r = -1; r <= 1; r++) {
+          k.near('solid', new THREE.CylinderGeometry(0.05, 0.05, 0.06, 5).rotateX(Math.PI / 2), steelD, P2(x + r * 0.6 + step / 2, ry, side + out * 1.1));
+        }
+      }
     }
   }
+  // cross girders under the deck
+  if (k.fine) for (let x = 1.5; x < len; x += 6) k.near('solid', new THREE.BoxGeometry(0.3, 0.6, 7.2), steelD, P2(x, deckY - 0.45, 0));
   // columns where the ground is clear
   for (let x = 6; x < len - 3; x += 16) {
     const p0 = toWorld(x, -3.3), p1 = toWorld(x, 3.3), pm = toWorld(x, 0);
@@ -1250,7 +1548,14 @@ export function elevatedL(k: Kit, placer: Placer, o: LOpts): void {
     const h = deckY - 1.5 - gy;
     for (const cz of [-3.3, 3.3]) {
       s.push([new THREE.BoxGeometry(0.8, h, 0.8), steel, L(base, M.t(x, gy + h / 2, cz))]);
-      s.push([new THREE.BoxGeometry(1.3, 0.4, 1.3), steelD, L(base, M.t(x, gy + 0.2, cz))]);
+      s.push([k.fine ? bevelBox(1.4, 0.6, 1.4, 0.15) : new THREE.BoxGeometry(1.3, 0.4, 1.3), steelD, L(base, M.t(x, gy + 0.3, cz))]);
+      if (k.fine) {
+        // flared foot, flange edges and a capital plate
+        s.push([new THREE.CylinderGeometry(0.45, 0.85, 1.4, 4).rotateY(Math.PI / 4), steel, L(base, M.t(x, gy + 1.3, cz))]);
+        for (const fz of [-0.42, 0.42]) s.push([new THREE.BoxGeometry(0.95, h - 2, 0.08), steelD, L(base, M.t(x, gy + h / 2 + 0.5, cz + fz))]);
+        s.push([bevelBox(1.5, 0.3, 1.5, 0.08), steelD, L(base, M.t(x, deckY - 1.65, cz))]);
+        if (k.q === 'high') for (let ry = gy + 2.5; ry < deckY - 2; ry += 1.2) for (const fz of [-0.47, 0.47]) k.near('solid', new THREE.CylinderGeometry(0.05, 0.05, 0.06, 5).rotateX(Math.PI / 2), steelD, L(base, M.t(x + 0.3, ry, cz + fz)));
+      }
       beam(s, [x, deckY - 3.6, cz], [x + 1.8, deckY - 1.6, cz], 0.3, steel, base);
       beam(s, [x, deckY - 3.6, cz], [x - 1.8, deckY - 1.6, cz], 0.3, steel, base);
     }
@@ -1359,6 +1664,139 @@ export function elevatedL(k: Kit, placer: Placer, o: LOpts): void {
     im.instanceMatrix.needsUpdate = true;
     if (lights) lights.instanceMatrix.needsUpdate = true;
   });
+}
+
+/* ================================================================== street life & nature near the road */
+
+const cullHint = <T extends THREE.BufferGeometry>(g: T, cull: number, cell = 100): T => {
+  g.userData.lod = { cull, cell };
+  return g;
+};
+
+export interface StreetLifeOpts {
+  paths?: number[];
+  /** multiplies every spacing (bigger = sparser) */
+  sparse?: number;
+  benches?: boolean;
+  trash?: boolean;
+  hydrants?: boolean;
+  news?: boolean;
+  shelters?: boolean;
+  bikes?: boolean;
+  beds?: boolean;
+  lamps?: boolean;
+  snow?: boolean;
+  ads?: Array<[string, string]>;
+}
+
+/**
+ * Street furniture along the course (outside the walls, via the placer so nothing overlaps):
+ * benches, trash cans, hydrants, newspaper boxes, CTA shelters with ads, Divvy docks, acorn lamps
+ * and raised flower beds. Instanced, distance-culled; nothing on 'low'.
+ */
+export function streetLife(k: Kit, placer: Placer, o: StreetLifeOpts = {}): void {
+  if (!k.fine) return;
+  const q = k.q, hi = q === 'high';
+  const sp = (o.sparse ?? 1) * (hi ? 1 : 1.6);
+  const near = hi ? 170 : 110, mid = hi ? 260 : 170;
+  const paths = o.paths ?? [0];
+  const rng = new Rng(4711);
+  const put = (geo: THREE.BufferGeometry, mat: THREE.Material, spacing: number, offset: number, r: number, cull: number, name: string, yawOff = 0, color?: () => string) => {
+    const bt = k.batch(cullHint(geo, cull), mat, { cast: hi, name });
+    for (const pid of paths) for (const s of placer.along(pid, spacing * sp, offset, r, { jitter: 0.6 })) bt.add(s.x, s.y, s.z, s.yaw + yawOff, 1, 1, 1, color?.());
+  };
+  if (o.lamps) put(acornLamp('#20262e', '#fff3c4', q), k.solidMat, 46, 1.6, 0.6, mid, 'acornLamps');
+  if (o.benches !== false && !o.snow) put(parkBench(), k.solidMat, 70, 3.2, 1.4, near, 'benches', Math.PI);
+  if (o.trash !== false) put(trashCan(o.snow ? '#2a3a2f' : rng.pick(['#2a3a2f', '#1f3a5c'])), k.solidMat, 64, 2.2, 0.6, near, 'trashCans');
+  if (o.hydrants !== false) put(hydrant(), k.glossMat, 95, 1.7, 0.5, near, 'hydrants');
+  if (o.news !== false) put(newsBoxes(), k.solidMat, 140, 2.8, 1.2, near, 'newsBoxes', Math.PI);
+  if (o.shelters !== false) {
+    const ads = o.ads ?? [['#ff5f6d', '#ffd23f'], ['#2f7de1', '#ffffff'], ['#3ccf6e', '#ffe14d'], ['#b05cf0', '#ffd23f']];
+    ads.forEach(([bg, fg], i) => {
+      const bt = k.batch(cullHint(ctaShelter(bg, fg), mid), k.glossMat, { cast: hi, name: 'ctaShelters' });
+      for (const pid of paths) placer.along(pid, 230 * sp, 3.6, 3.2, { jitter: 1 }).forEach((s, j) => {
+        if (j % ads.length === i) bt.add(s.x, s.y, s.z, s.yaw + Math.PI);
+      });
+    });
+  }
+  if (o.bikes !== false && !o.snow) put(divvyDock(hi ? 6 : 4, q), k.solidMat, 260, 4.0, 4.4, near, 'divvyDocks', Math.PI);
+  if (o.beds !== false && !o.snow) put(flowerBed(q, 2.0), k.tintMat, 90, 5.2, 2.4, near, 'flowerBeds', 0, () => rng.pick(['#ff5fa2', '#ffd23f', '#ff7a3d', '#b48cff', '#ffffff', '#ff4d4d']));
+}
+
+/** Racing dressing: tyre stacks behind the barriers on the outside of the fastest corners. */
+export function tireWalls(k: Kit, placer: Placer, every = 2.2): void {
+  if (!k.fine) return;
+  const tr = placer.track;
+  const p = tr.paths[0];
+  const n = p.samples.length;
+  const bt = k.batch(cullHint(tireStack(k.q), k.q === 'high' ? 220 : 140), k.tintMat, { cast: k.q === 'high', name: 'tireStacks' });
+  const cols = ['#e3262b', '#ffffff', '#e3262b', '#2f6fd6'];
+  let c = 0;
+  for (let i = 0; i < n; i++) {
+    let cv = 0;
+    for (let d = -5; d <= 5; d++) cv += p.samples[(i + d + n) % n].curvature;
+    cv /= 11;
+    if (Math.abs(cv) < 0.018 || p.samples[i].gap) continue;
+    const side = -Math.sign(cv);
+    const smp = p.samples[i];
+    for (let row = 0; row < 2; row++) {
+      const lat = side * (smp.halfWidth + tr.def.shoulder + 1.75 + row * 0.95);
+      const x = smp.x + smp.nx * lat, z = smp.z + smp.nz * lat;
+      if (placer.field.clearance(x, z, 64) < 1.0 || !placer.free(x, z, 0.5) || placer.field.insideOther(x, z, -1, -1)) continue;
+      placer.reserve(x, z, 0.5);
+      bt.add(x, placer.field.height(x, z), z, i * 0.7, 1, 1, 1, cols[c++ % cols.length]);
+    }
+    i += Math.max(0, Math.round(every / Math.max(0.5, (p.samples[1]?.s ?? 1) - p.samples[0].s)) - 1);
+  }
+}
+
+/**
+ * Instanced grass tufts (and optional wildflowers) in a band just outside the barriers, distance
+ * culled (they only exist near the camera). Uses free ground only (placer / terrain / not water).
+ */
+export function edgeGrass(k: Kit, placer: Placer, o: { base: string; tip: string; flowers?: string[]; spacing?: number; band?: [number, number]; paths?: number[]; minY?: number; h?: number }): void {
+  if (!k.fine) return;
+  const q = k.q, hi = q === 'high';
+  const tr = placer.track, field = placer.field;
+  const rng = new Rng(9091);
+  const cull = hi ? 95 : 60;
+  const tufts = [0, 1].map((v) => k.batch(cullHint(grassTuft(o.base, o.tip, q, { seed: 11 + v * 17, h: (o.h ?? 0.7) * (v ? 1.3 : 1), blades: hi ? 9 : 6, spread: 0.22 }), cull, 60), k.solidMat, { cast: false, name: 'grassTufts' }));
+  let flowers: Batch | null = null;
+  if (o.flowers?.length) {
+    const fg = grassTuft(o.base, o.tip, q, { seed: 5, blades: 4, h: 0.4 });
+    const heads = mergeColored([0, 1, 2].map((i): [THREE.BufferGeometry, string, THREE.Matrix4] => [new THREE.IcosahedronGeometry(0.07, 0), '#ffffff', M.t(Math.cos(i * 2.1) * 0.12, 0.42 + i * 0.05, Math.sin(i * 2.1) * 0.12)]));
+    const merged = mergeGeometries([fg, heads.index ? heads.toNonIndexed() : heads].map((g) => {
+      if (!g.attributes.color) throw new Error('no color');
+      return g;
+    }), false)!;
+    merged.userData.sway = fg.userData.sway;
+    merged.userData.tintMask = true;
+    fg.dispose();
+    heads.dispose();
+    flowers = k.batch(cullHint(merged, cull, 60), k.solidMat, { cast: false, name: 'wildflowers' });
+  }
+  const spacing = (o.spacing ?? 1.2) * (hi ? 1 : 1.7);
+  const [b0, b1] = o.band ?? [0.7, 5];
+  for (const pid of o.paths ?? tr.paths.map((p) => p.id)) {
+    const p = tr.paths[pid];
+    for (let s = 0; s < p.length; s += spacing * rng.range(0.6, 1.4)) {
+      const smp = tr.sampleAt(pid, s);
+      if (smp.gap) continue;
+      for (const side of [-1, 1]) {
+        // a few tufts hug the foot of the barrier on the shoulder, the rest grow in a band behind it
+        const inner = tr.def.shoulder > 1.2 && rng.chance(0.35);
+        const lat = inner ? side * (smp.halfWidth + tr.def.shoulder - rng.range(0.05, 0.6)) : side * (smp.halfWidth + tr.def.shoulder + rng.range(b0, b1));
+        const jx = inner ? 0 : rng.range(-0.4, 0.4), jz = inner ? 0 : rng.range(-0.4, 0.4);
+        const x = smp.x + smp.nx * lat + jx, z = smp.z + smp.nz * lat + jz;
+        if ((!inner && field.clearance(x, z, 16) < 0.45) || field.insideOther(x, z, -1, -1)) continue;
+        const y = field.height(x, z);
+        if (y < (o.minY ?? -0.3) || !placer.free(x, z, 0.15)) continue;
+        const sc = rng.range(0.8, 1.6) * (inner ? 0.8 : 1);
+        if (flowers && rng.chance(0.16)) flowers.add(x, y, z, rng.next() * 6, sc, sc, sc, rng.pick(o.flowers!));
+        else tufts[rng.int(2)].add(x, y - 0.02, z, rng.next() * 6, sc, sc * rng.range(0.8, 1.2), sc);
+      }
+    }
+  }
 }
 
 /* ================================================================== helpers */
@@ -1499,12 +1937,14 @@ export function buildNavyPier(k: Kit, placer: Placer, o: { shoreX: number; pierZ
     const parts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [
       [new THREE.BoxGeometry(px1 - px0, 1.2, 44), '#cdbfa6', M.t((px0 + px1) / 2, 0.6, pz)],
       [new THREE.BoxGeometry(px1 - px0, 2.5, 46), '#8b7d6b', M.t((px0 + px1) / 2, -1.2, pz)],
-      // exhibition halls
-      [new THREE.BoxGeometry(150, 9, 16), '#e9dcc4', M.t(px0 + 140, 5.7, pz + 12)],
+      // exhibition halls (windowed facades on medium / high)
+      ...(k.fine ? [] : [
+        [new THREE.BoxGeometry(150, 9, 16), '#e9dcc4', M.t(px0 + 140, 5.7, pz + 12)],
+        [new THREE.BoxGeometry(40, 16, 30), '#d9c19b', M.t(px1 - 22, 9.2, pz)],
+        [new THREE.BoxGeometry(14, 22, 14), '#c9a77c', M.t(px0 + 18, 12.2, pz + 10)],
+      ] as Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>),
       [new THREE.BoxGeometry(152, 1.2, 18), '#2f6f6a', M.t(px0 + 140, 10.8, pz + 12)],
-      [new THREE.BoxGeometry(40, 16, 30), '#d9c19b', M.t(px1 - 22, 9.2, pz)],
       [new THREE.CylinderGeometry(9, 12, 6, 8), '#2f6f6a', M.t(px1 - 22, 20, pz)],
-      [new THREE.BoxGeometry(14, 22, 14), '#c9a77c', M.t(px0 + 18, 12.2, pz + 10)],
       [new THREE.ConeGeometry(10.5, 6, 4).rotateY(Math.PI / 4), '#2f6f6a', M.t(px0 + 18, 26.2, pz + 10)],
     ];
     // railing posts along the pier edge
@@ -1512,6 +1952,22 @@ export function buildNavyPier(k: Kit, placer: Placer, o: { shoreX: number; pierZ
       parts.push([new THREE.BoxGeometry(0.3, 1.1, 0.3), '#3c3c3c', M.t(x, 1.75, pz - 21.5)]);
     }
     parts.push([new THREE.BoxGeometry(px1 - px0, 0.2, 0.2), '#3c3c3c', M.t((px0 + px1) / 2, 2.2, pz - 21.5)]);
+    if (k.fine) {
+      k.facade('cream', boxUV(150, 9, 16, px0 + 140, 1.2, pz + 12));
+      k.facade('tan', boxUV(40, 16, 30, px1 - 22, 1.2, pz));
+      k.facade('brick', boxUV(14, 22, 14, px0 + 18, 1.2, pz + 10));
+      dressBlock(k, M.t(px0 + 18, 1.2, pz + 10), 14, 22, 14, { cornice: '#e6d8bd', roof: 'none' });
+      dressBlock(k, M.t(px1 - 22, 1.2, pz), 40, 16, 30, { cornice: '#e6d8bd', roof: 'none', plinth: '#b8a888' });
+      // arched glass end hall + promenade lamps and benches along the pier
+      for (let x = px0 + 30; x < px1 - 50; x += 14) {
+        const lp: P = [];
+        lp.push([lathe([[0.25, 0], [0.18, 0.4], [0.08, 0.6], [0.07, 3.8], [0.14, 4.0]], 8), '#20262e', M.t(x, 1.2, pz - 19.5)]);
+        lp.push([new THREE.SphereGeometry(0.3, 8, 6), '#fff3c4', M.trs(x, 5.5, pz - 19.5, 0, 0, 0, 1, 1.3, 1)]);
+        lp.push([bevelBox(1.8, 0.1, 0.5, 0.03), '#a8713f', M.t(x + 7, 1.7, pz - 19.6)]);
+        lp.push([bevelBox(1.8, 0.4, 0.08, 0.03), '#a8713f', M.t(x + 7, 2.0, pz - 19.9)]);
+        k.nearParts('solid', lp);
+      }
+    }
     const pm = new THREE.Mesh(bag.add(mergeColored(parts)), vc);
     pm.castShadow = pm.receiveShadow = true;
     group.add(pm);
@@ -1557,33 +2013,51 @@ export function buildNavyPier(k: Kit, placer: Placer, o: { shoreX: number; pierZ
     const wheel = new THREE.Group();
     wheel.position.y = hubY;
     wheelRoot.add(wheel);
+    const hiQ = k.q === 'high', loQ = k.q === 'low';
+    const tubSeg = hiQ ? 128 : loQ ? 64 : 96;
     const wparts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [
-      [new THREE.TorusGeometry(R, 0.45, 6, 64), '#ffffff', M.t(0, 0, 1.6)],
-      [new THREE.TorusGeometry(R, 0.45, 6, 64), '#ffffff', M.t(0, 0, -1.6)],
+      [new THREE.TorusGeometry(R, 0.45, hiQ ? 8 : 6, tubSeg), '#ffffff', M.t(0, 0, 1.6)],
+      [new THREE.TorusGeometry(R, 0.45, hiQ ? 8 : 6, tubSeg), '#ffffff', M.t(0, 0, -1.6)],
+      [new THREE.TorusGeometry(R - 1.6, 0.25, 6, tubSeg), '#ffffff', M.t(0, 0, 1.6)],
+      [new THREE.TorusGeometry(R - 1.6, 0.25, 6, tubSeg), '#ffffff', M.t(0, 0, -1.6)],
       [new THREE.TorusGeometry(R * 0.55, 0.3, 6, 48), '#ff4d4d', M.t(0, 0, 0)],
+      [lathe([[1.9, -2.6], [2.2, -2.2], [2.2, 2.2], [1.9, 2.6], [0.6, 2.9]], 16).rotateX(Math.PI / 2), '#d9d9d9', M.t(0, 0, 0)],
     ];
-    const NS = 20;
+    const NS = hiQ ? 40 : loQ ? 20 : 30;
     for (let i = 0; i < NS; i++) {
       const a = (i / NS) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
       for (const zz of [1.6, -1.6]) {
-        wparts.push([new THREE.BoxGeometry(0.22, R, 0.22), i % 2 ? '#ff4d4d' : '#ffffff', M.trs(Math.cos(a) * R * 0.5, Math.sin(a) * R * 0.5, zz, 0, 0, a - Math.PI / 2)]);
+        // tangential spokes (offset from the hub like the real wheel)
+        const ta = a + (zz > 0 ? 0.08 : -0.08);
+        beam(wparts, [Math.cos(ta + Math.PI / 2) * 2.0, Math.sin(ta + Math.PI / 2) * 2.0, zz * 1.4], [ca * R, sa * R, zz], 0.16, i % 2 ? '#ff4d4d' : '#ffffff');
+      }
+      // rungs between the rims + truss diagonals
+      if (!loQ) {
+        beam(wparts, [ca * R, sa * R, 1.6], [ca * R, sa * R, -1.6], 0.14, '#ffffff');
+        const a2 = ((i + 1) / NS) * Math.PI * 2;
+        beam(wparts, [ca * R, sa * R, 1.6], [Math.cos(a2) * (R - 1.6), Math.sin(a2) * (R - 1.6), 1.6], 0.1, '#ffffff');
+        beam(wparts, [ca * R, sa * R, -1.6], [Math.cos(a2) * (R - 1.6), Math.sin(a2) * (R - 1.6), -1.6], 0.1, '#ffffff');
       }
     }
     // rim lights
-    for (let i = 0; i < 64; i++) {
-      const a = (i / 64) * Math.PI * 2;
-      wparts.push([new THREE.SphereGeometry(0.42, 6, 4), i % 2 ? '#fff27a' : '#ff7ad9', M.t(Math.cos(a) * R, Math.sin(a) * R, 2.1)]);
+    const NL = hiQ ? 96 : 64;
+    for (let i = 0; i < NL; i++) {
+      const a = (i / NL) * Math.PI * 2;
+      wparts.push([new THREE.SphereGeometry(0.38, 6, 4), i % 2 ? '#fff27a' : '#ff7ad9', M.t(Math.cos(a) * R, Math.sin(a) * R, 2.1)]);
     }
-    const wheelMesh = new THREE.Mesh(bag.add(mergeColored(wparts)), bag.add(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.2, emissive: '#331a22', emissiveIntensity: 0.4 })));
+    const wheelMesh = new THREE.Mesh(bag.add(mergeColored(wparts)), bag.add(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.25, emissive: '#331a22', emissiveIntensity: 0.4 })));
     wheelMesh.castShadow = true;
     wheel.add(wheelMesh);
-    const NG = 24;
+    const NG = hiQ ? 42 : loQ ? 24 : 30;
+    const gs = hiQ ? 12 : 8;
     const gondGeo = bag.add(
       mergeColored([
-        [new THREE.CylinderGeometry(1.5, 1.3, 2.6, 8), '#ffffff', M.t(0, -2.2, 0)],
-        [new THREE.CylinderGeometry(1.7, 1.7, 0.4, 8), '#ffffff', M.t(0, -0.8, 0)],
-        [new THREE.CylinderGeometry(1.52, 1.52, 1.0, 8), '#3b5f8a', M.t(0, -1.7, 0)],
-        [new THREE.BoxGeometry(0.2, 1.0, 0.2), '#888', M.t(0, -0.3, 0)],
+        [lathe([[0.2, -3.6], [1.2, -3.5], [1.5, -3.2], [1.55, -2.6], [1.55, -1.3], [1.45, -1.05]], gs), '#ffffff'],
+        [new THREE.CylinderGeometry(1.58, 1.58, 1.0, gs, 1, true), '#3b5f8a', M.t(0, -1.95, 0)],
+        [lathe([[1.75, 0], [1.7, 0.18], [1.2, 0.42], [0.3, 0.55], [0.0, 0.58]], gs), '#ffffff', M.t(0, -1.05, 0)],
+        [new THREE.CylinderGeometry(0.08, 0.08, 1.0, 6), '#888', M.t(0, -0.3, 0)],
+        ...(hiQ ? Array.from({ length: 6 }, (_, j): [THREE.BufferGeometry, string, THREE.Matrix4] => [new THREE.BoxGeometry(0.1, 1.0, 0.08), '#ffffff', M.trs(Math.cos((j / 6) * Math.PI * 2) * 1.58, -1.95, Math.sin((j / 6) * Math.PI * 2) * 1.58, 0, -(j / 6) * Math.PI * 2, 0)]) : []),
       ]),
     );
     const gond = new THREE.InstancedMesh(gondGeo, vc, NG);
@@ -1619,23 +2093,62 @@ export function buildBuckingham(k: Kit, placer: Placer, x: number, z: number, wa
   const updaters = k.updaters;
 
     placer.reserve(fo.x, fo.z, 34);
-    const pink = '#f1c6b5';
+    const pink = '#f1c6b5', pink2 = '#e3b19f';
+    const hq = quality === 'high', lq = quality === 'low';
+    const sg = hq ? 64 : lq ? 32 : 48;
+    const T = (px: number, py: number, pz: number) => M.t(fo.x + px, py, fo.z + pz);
     const fparts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [
-      [new THREE.CylinderGeometry(26, 26.5, 1.2, 48), pink, M.t(fo.x, 0.6, fo.z)],
-      [new THREE.CylinderGeometry(9, 11, 3, 24), pink, M.t(fo.x, 1.5, fo.z)],
-      [new THREE.CylinderGeometry(10, 8, 1.2, 24), pink, M.t(fo.x, 3.6, fo.z)],
-      [new THREE.CylinderGeometry(4, 5, 3, 16), pink, M.t(fo.x, 5.5, fo.z)],
-      [new THREE.CylinderGeometry(6, 4.5, 1, 20), pink, M.t(fo.x, 7.4, fo.z)],
-      [new THREE.CylinderGeometry(1.6, 2.4, 3, 12), pink, M.t(fo.x, 9.2, fo.z)],
-      [new THREE.CylinderGeometry(3, 2, 0.8, 16), pink, M.t(fo.x, 10.9, fo.z)],
+      // great basin rim with a moulded lip
+      [lathe([[25.6, 0], [26.6, 0], [26.6, 0.9], [26.9, 1.05], [26.9, 1.3], [26.2, 1.4], [25.6, 1.3]], sg), pink, T(0, 0, 0)],
+      // lower tier: pedestal + scalloped bowl
+      [lathe([[11, 0], [10.4, 0.4], [9.2, 1.0], [9, 3]], sg / 2), pink, T(0, 0, 0)],
+      [lathe([[0, 3.0], [8, 3.0], [10.2, 3.6], [10.4, 4.25], [9.9, 4.35], [9.6, 4.2]], sg), pink, T(0, 0, 0)],
+      // middle tier
+      [lathe([[5, 4.2], [4.2, 4.6], [3.8, 6.2], [4.3, 7.0]], sg / 2), pink2, T(0, 0, 0)],
+      [lathe([[0, 6.9], [4.5, 6.9], [6.1, 7.5], [6.2, 7.95], [5.8, 8.0]], sg), pink, T(0, 0, 0)],
+      // top tier + spout
+      [lathe([[2.4, 7.9], [1.8, 8.4], [1.5, 10.2], [2.0, 10.6]], sg / 2), pink2, T(0, 0, 0)],
+      [lathe([[0, 10.5], [2.4, 10.5], [3.1, 10.95], [3.1, 11.25], [2.8, 11.3]], sg / 2), pink, T(0, 0, 0)],
+      [lathe([[0.7, 11.2], [0.45, 11.6], [0.35, 12.2], [0.0, 12.3]], 12), pink2, T(0, 0, 0)],
     ];
-    // sea horses
+    // scallops (shell lobes) round the tier lips
+    if (!lq) for (const [r, y, n, sz] of [[10.2, 4.0, hq ? 32 : 20, 0.7], [6.1, 7.7, hq ? 24 : 14, 0.55], [3.0, 11.05, hq ? 14 : 10, 0.45]] as const) {
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        fparts.push([new THREE.SphereGeometry(sz, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), pink2, M.trs(fo.x + Math.cos(a) * r, y, fo.z + Math.sin(a) * r, Math.PI / 2, 0, -a + Math.PI / 2, 1, 0.5, 1)]);
+      }
+    }
+    // sea horses: coiled tail, arched body, head with snout and fin
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      fparts.push([new THREE.CylinderGeometry(0.9, 1.3, 3, 8), '#5f8f7a', M.trs(fo.x + Math.cos(a) * 17, 2.2, fo.z + Math.sin(a) * 17, 0.3 * Math.sin(a), 0, -0.3 * Math.cos(a))]);
+      const hb = M.trs(fo.x + Math.cos(a) * 17, 0.9, fo.z + Math.sin(a) * 17, 0, -a - Math.PI / 2, 0);
+      const bronze = '#5f8f7a', bz2 = '#4d7865';
+      fparts.push([new THREE.CylinderGeometry(1.6, 2.0, 1.2, 12), pink2, L(hb, M.t(0, 0.2, 0))]);
+      fparts.push([new THREE.TorusGeometry(0.75, 0.3, 6, 12, Math.PI * 1.5), bronze, L(hb, M.trs(0, 1.6, -0.6, 0, Math.PI / 2, 0))]);
+      fparts.push([new THREE.CapsuleGeometry(0.75, 1.8, 4, 10), bronze, L(hb, M.trs(0, 2.7, 0.2, 0.35, 0, 0))]);
+      fparts.push([new THREE.SphereGeometry(0.7, 10, 8), bronze, L(hb, M.trs(0, 4.1, 0.9, 0, 0, 0, 0.8, 0.9, 1.1))]);
+      fparts.push([new THREE.CylinderGeometry(0.22, 0.32, 1.2, 8).rotateX(Math.PI / 2), bz2, L(hb, M.t(0, 4.0, 1.8))]);
+      fparts.push([new THREE.ConeGeometry(0.5, 1.4, 4), bz2, L(hb, M.trs(0, 4.8, 0.4, -0.5, 0, 0, 0.3, 1, 1))]);
+      for (const sx of [-1, 1]) fparts.push([new THREE.ConeGeometry(0.4, 1.1, 4), bz2, L(hb, M.trs(sx * 0.6, 3.0, 0.6, 0.6, 0, sx * 0.8, 0.3, 1, 1))]);
     }
-    // plaza ring + flower beds
-    fparts.push([new THREE.CylinderGeometry(36, 36, 0.3, 48), '#e9dcc3', M.t(fo.x, 0.05, fo.z)]);
+    // plaza ring, balustrade of posts on the outer basin and lamp standards
+    fparts.push([new THREE.CylinderGeometry(36, 36, 0.3, sg), '#e9dcc3', M.t(fo.x, 0.05, fo.z)]);
+    if (!lq) {
+      const np = hq ? 120 : 64;
+      for (let i = 0; i < np; i++) {
+        const a = (i / np) * Math.PI * 2;
+        k.near('solid', lathe([[0.16, 0], [0.12, 0.15], [0.17, 0.4], [0.1, 0.6], [0.16, 0.7]], 6), pink2, T(Math.cos(a) * 27.6, 0.2, Math.sin(a) * 27.6));
+      }
+      fparts.push([new THREE.TorusGeometry(27.6, 0.18, 4, sg).rotateX(Math.PI / 2), pink, T(0, 0.98, 0)]);
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+        const lp: P = [];
+        const lm = M.t(fo.x + Math.cos(a) * 31, 0.2, fo.z + Math.sin(a) * 31);
+        lp.push([lathe([[0.4, 0], [0.3, 0.6], [0.14, 1.0], [0.1, 4.2], [0.18, 4.4]], 8), '#2b3238', lm]);
+        lp.push([new THREE.SphereGeometry(0.42, 10, 8), '#fff3c4', L(lm, M.trs(0, 4.85, 0, 0, 0, 0, 1, 1.3, 1))]);
+        k.nearParts('solid', lp);
+      }
+    }
     const fm = new THREE.Mesh(bag.add(mergeColored(fparts)), vc);
     fm.castShadow = fm.receiveShadow = true;
     group.add(fm);
@@ -1732,51 +2245,156 @@ export function win(parts: P, x: number, y: number, z: number, w = 1.3, h = 1.7,
   parts.push([new THREE.BoxGeometry(w + 0.5, 0.14, 0.35), frame, t(M.t(x, y - h / 2 - 0.15, z + 0.1))]);
 }
 
-/** Chicago two-flat (8 x 8.4 x 14 m, `simple` drops the side windows for far LOD): body tinted by instance color (brick), details untinted. Front faces +Z. */
-export function twoFlat(simple = false): { body: THREE.BufferGeometry; detail: THREE.BufferGeometry } {
-  const W = 8, H = 8.4, D = 14;
-  const body = mergeColored([
-    [new THREE.BoxGeometry(W, H, D), '#ffffff', M.t(0, H / 2, 0)],
-    [new THREE.BoxGeometry(3.2, H - 0.6, 1.4), '#ffffff', M.t(-1.6, (H - 0.6) / 2, D / 2 + 0.6)], // bay
-  ]);
-  const d: P = [
-    [new THREE.BoxGeometry(W + 0.5, 0.7, D + 0.5), '#e9dcc4', M.t(0, H + 0.1, 0)], // cornice
-    [new THREE.BoxGeometry(W + 0.1, 0.3, D + 0.1), '#d8cab0', M.t(0, H / 2, 0)],
-    [new THREE.BoxGeometry(2.6, 1.2, 2.6), '#cfc6b8', M.t(2.4, 0.6, D / 2 + 1.3)], // stoop
-    [new THREE.BoxGeometry(1.3, 2.4, 0.2), '#5a2f1c', M.t(2.4, 2.4, D / 2 + 0.02)], // door
-    [new THREE.BoxGeometry(3.0, 0.25, 2.2), '#5d4037', M.t(2.4, 3.8, D / 2 + 1.1)], // canopy
-  ];
-  for (const y of [2.6, 6.2]) win(d, -1.6, y, D / 2 + 1.32, 2.2, 1.9);
-  win(d, 2.4, 6.2, D / 2 + 0.02, 1.2, 1.8);
-  if (!simple) for (const side of [-1, 1]) {
-    const xf = new THREE.Matrix4().makeRotationY((side * Math.PI) / 2);
-    for (const z of [-4, 0, 4]) for (const y of [2.6, 6.2]) win(d, z, y, W / 2 + 0.02, 1.1, 1.6, '#2e4a6b', '#f4f1e8', xf);
-  }
-  return { body, detail: mergeColored(d) };
+/** Body material for instanced houses: stylised masonry (bricks) or lap siding on 'medium' / 'high'. */
+export function houseBodyMat(bag: Bag, kind: 'brick' | 'siding' = 'brick'): THREE.MeshStandardMaterial {
+  const m = vcMat(bag, { roughness: 0.85 });
+  if (BUILD.quality === 'low') return m;
+  return kind === 'brick'
+    ? masonry(m, { space: 'local', size: [0.6, 0.23], mortar: 0.15, mortarColor: '#d8cbb6', jitter: 0.22, bump: 1.4, tintedOnly: true })
+    : masonry(m, { space: 'local', size: [9, 0.28], mortar: 0.12, mortarColor: '#9a9a9a', jitter: 0.03, bump: 2.2, tintedOnly: true });
 }
 
-/** Brick bungalow with a hipped roof and porch. */
+/** Detail level for house kits: 'high'/'medium' -> fine near detail with an LOD hint to `far`. */
+const houseQ = (): Quality => BUILD.quality;
+const lodHint = (near: THREE.BufferGeometry, far: THREE.BufferGeometry | null, dist: number): THREE.BufferGeometry => {
+  near.userData.lod = { far, dist, cell: 110 };
+  return near;
+};
+
+/** Angled three-sided bay (front width fw, back width bw, depth dd, height h) centred at x, front +Z at z. */
+function bayGeo(x: number, z: number, bw: number, fw: number, dd: number, h: number): THREE.BufferGeometry {
+  const sh = new THREE.Shape();
+  sh.moveTo(x - bw / 2, -(z - 0.05));
+  sh.lineTo(x + bw / 2, -(z - 0.05));
+  sh.lineTo(x + fw / 2, -(z + dd));
+  sh.lineTo(x - fw / 2, -(z + dd));
+  sh.closePath();
+  const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false });
+  g.rotateX(-Math.PI / 2);
+  return g;
+}
+
+/**
+ * Chicago two-flat (8 x 8.4 x 14 m): brick body (tinted per instance), angled bay with three
+ * windows per floor, bracketed cornice, stone lintels / keystones, stoop with steps, transom door
+ * and a black fire escape on the side. `simple` = the cheap far version. Front faces +Z.
+ */
+export function twoFlat(simple = false): { body: THREE.BufferGeometry; detail: THREE.BufferGeometry } {
+  const W = 8, H = 8.4, D = 14;
+  const q = houseQ();
+  const fine = !simple && q !== 'low';
+  const body = mergeColored([
+    [new THREE.BoxGeometry(W, H, D), '#ffffff', M.t(0, H / 2, 0)],
+    fine ? [bayGeo(-1.6, D / 2, 3.4, 2.0, 1.2, H - 0.6), '#ffffff'] : [new THREE.BoxGeometry(3.2, H - 0.6, 1.4), '#ffffff', M.t(-1.6, (H - 0.6) / 2, D / 2 + 0.6)],
+  ]);
+  const farDetail = (): THREE.BufferGeometry => {
+    const d: P = [
+      [new THREE.BoxGeometry(W + 0.5, 0.7, D + 0.5), '#e9dcc4', M.t(0, H + 0.1, 0)],
+      [new THREE.BoxGeometry(W + 0.1, 0.3, D + 0.1), '#d8cab0', M.t(0, H / 2, 0)],
+      [new THREE.BoxGeometry(2.6, 1.2, 2.6), '#cfc6b8', M.t(2.4, 0.6, D / 2 + 1.3)],
+      [new THREE.BoxGeometry(1.3, 2.4, 0.2), '#5a2f1c', M.t(2.4, 2.4, D / 2 + 0.02)],
+      [new THREE.BoxGeometry(3.0, 0.25, 2.2), '#5d4037', M.t(2.4, 3.8, D / 2 + 1.1)],
+    ];
+    for (const y of [2.6, 6.2]) win(d, -1.6, y, D / 2 + 1.32, 2.2, 1.9);
+    win(d, 2.4, 6.2, D / 2 + 0.02, 1.2, 1.8);
+    return mergeColored(d);
+  };
+  if (!fine) return { body, detail: farDetail() };
+  const stone = '#e6dcc8', trim = '#f4f1e8', glass = '#2b4566';
+  const d: P = [
+    // bracketed cornice + frieze band
+    [bevelBox(W + 0.7, 0.55, D + 0.7, 0.18), stone, M.t(0, H + 0.2, 0)],
+    [new THREE.BoxGeometry(W + 0.2, 0.5, D + 0.2), '#d8cab0', M.t(0, H - 0.25, 0)],
+    [bevelBox(3.9, 0.45, 1.75, 0.12), stone, M.t(-1.6, H - 0.28, D / 2 + 0.75)],
+    // string course between floors + stone base course
+    [bevelBox(W + 0.16, 0.24, D + 0.16, 0.07), stone, M.t(0, H / 2, 0)],
+    [bevelBox(W + 0.2, 0.9, D + 0.2, 0.1), '#b9ad98', M.t(0, 0.45, 0)],
+    // stoop: landing, steps, cheek walls, door with transom, canopy
+    [bevelBox(2.6, 1.3, 1.8, 0.08), '#cfc6b8', M.t(2.4, 0.65, D / 2 + 0.9)],
+    [new THREE.BoxGeometry(1.4, 2.4, 0.14), '#5a2f1c', M.t(2.4, 2.5, D / 2 + 0.03)],
+    [new THREE.BoxGeometry(1.2, 2.0, 0.1), '#6e3a22', M.t(2.4, 2.4, D / 2 + 0.08)],
+    [new THREE.BoxGeometry(1.4, 0.45, 0.12), glass, M.t(2.4, 3.95, D / 2 + 0.04)],
+    [bevelBox(1.9, 0.22, 0.36, 0.06), stone, M.t(2.4, 4.3, D / 2 + 0.12)],
+    [new THREE.SphereGeometry(0.06, 6, 4), '#d4b04a', M.t(2.85, 2.4, D / 2 + 0.16)],
+  ];
+  for (let i = 0; i < 4; i++) d.push([bevelBox(2.0, 0.3, 0.42, 0.05), '#cfc6b8', M.t(2.4, 0.15 + i * 0.3, D / 2 + 1.8 + (3 - i) * 0.4)]);
+  for (const sx of [-1, 1]) d.push([bevelBox(0.3, 1.4, 3.2, 0.06), '#bfb5a4', M.trs(2.4 + sx * 1.15, 0.7, D / 2 + 1.6, 0, 0, 0)]);
+  // cornice brackets
+  for (let x = -W / 2 + 0.4; x <= W / 2 - 0.3; x += 0.9) d.push([bevelBox(0.22, 0.5, 0.42, 0.05), stone, M.t(x, H - 0.45, D / 2 + 0.25)]);
+  // bay: three windows per floor on the angled faces
+  const bayZ = D / 2 + 1.2;
+  const ang = Math.atan2(1.2, (3.4 - 2.0) / 2);
+  for (const y of [2.7, 6.3]) {
+    winFine(d, -1.6, y, bayZ + 0.02, 1.4, 1.9, glass, trim, undefined, { lintel: stone, keystone: true });
+    for (const sx of [-1, 1]) {
+      const cx = -1.6 + sx * (3.4 + 2.0) / 4, cz = D / 2 + 0.6;
+      winFine(d, 0, y, 0.03, 0.7, 1.8, glass, trim, M.trs(cx, 0, cz, 0, sx * (Math.PI / 2 - ang), 0), { mullion: false, lintel: stone });
+    }
+  }
+  winFine(d, 2.4, 6.3, D / 2 + 0.02, 1.2, 1.8, glass, trim, undefined, { lintel: stone, keystone: true });
+  // side windows (+x side) and fire escape on the -x side
+  const sideR = new THREE.Matrix4().makeRotationY(Math.PI / 2), sideL = new THREE.Matrix4().makeRotationY(-Math.PI / 2);
+  for (const z of [-4, 0, 4]) for (const y of [2.6, 6.2]) {
+    winFine(d, -z, y, W / 2 + 0.02, 1.1, 1.6, glass, trim, sideR, { mullion: false, lintel: stone });
+    winFine(d, z, y, W / 2 + 0.02, 1.1, 1.6, glass, trim, sideL, { mullion: false, lintel: stone });
+  }
+  fireEscapeParts(d, sideL, 2, W / 2 + 0.02, [3.6, 7.2], 3.4);
+  // rooftop: chimney + vent
+  d.push([bevelBox(0.8, 1.6, 0.8, 0.08), '#8f4a35', M.t(2.8, H + 1.1, -4)]);
+  d.push([new THREE.BoxGeometry(1.0, 0.15, 1.0), stone, M.t(2.8, H + 1.95, -4)]);
+  d.push([new THREE.CylinderGeometry(0.15, 0.15, 0.8, 6), '#9aa0a8', M.t(-2, H + 0.8, 3)]);
+  return { body, detail: lodHint(mergeColored(d), farDetail(), q === 'high' ? 120 : 75) };
+}
+
+/** Brick bungalow with a hipped roof, dormer and a columned porch. */
 export function bungalow(): { body: THREE.BufferGeometry; detail: THREE.BufferGeometry } {
   const W = 9, H = 4.2, D = 13;
+  const q = houseQ();
   const body = mergeColored([[new THREE.BoxGeometry(W, H, D), '#ffffff', M.t(0, H / 2, 0)]]);
-  const d: P = [
+  const base = (): P => [
     [new THREE.ConeGeometry(Math.hypot(W, D) / 2 + 0.6, 4.2, 4, 1).rotateY(Math.PI / 4), '#4a4f5a', M.trs(0, H + 2.05, 0, 0, 0, 0, W / Math.hypot(W, D) * 1.05, 1, D / Math.hypot(W, D) * 1.05)],
     [new THREE.BoxGeometry(2.0, 2.2, 1.0), '#ffffff', M.t(0, H + 2.2, 2.5)], // dormer
     [new THREE.ConeGeometry(1.5, 1.0, 4).rotateY(Math.PI / 4), '#4a4f5a', M.t(0, H + 3.7, 2.5)],
     [new THREE.BoxGeometry(W - 1, 0.4, 3), '#cfc6b8', M.t(0, 0.6, D / 2 + 1.5)], // porch
     [new THREE.BoxGeometry(W - 1, 0.25, 3.2), '#e8e1d4', M.t(0, 3.4, D / 2 + 1.5)],
-    [new THREE.BoxGeometry(0.35, 2.8, 0.35), '#f2efe8', M.t(-W / 2 + 0.8, 2.0, D / 2 + 2.8)],
-    [new THREE.BoxGeometry(0.35, 2.8, 0.35), '#f2efe8', M.t(W / 2 - 0.8, 2.0, D / 2 + 2.8)],
-    [new THREE.BoxGeometry(1.2, 2.2, 0.2), '#7a2e1f', M.t(1.8, 1.9, D / 2 + 0.02)],
   ];
-  win(d, -2.0, 2.2, D / 2 + 0.02, 2.6, 1.6);
-  win(d, 0, 6.5, 3.02, 1.2, 1.0);
-  return { body, detail: mergeColored(d) };
+  const far = (): THREE.BufferGeometry => {
+    const d = base();
+    d.push([new THREE.BoxGeometry(0.35, 2.8, 0.35), '#f2efe8', M.t(-W / 2 + 0.8, 2.0, D / 2 + 2.8)]);
+    d.push([new THREE.BoxGeometry(0.35, 2.8, 0.35), '#f2efe8', M.t(W / 2 - 0.8, 2.0, D / 2 + 2.8)]);
+    d.push([new THREE.BoxGeometry(1.2, 2.2, 0.2), '#7a2e1f', M.t(1.8, 1.9, D / 2 + 0.02)]);
+    win(d, -2.0, 2.2, D / 2 + 0.02, 2.6, 1.6);
+    win(d, 0, 6.5, 3.02, 1.2, 1.0);
+    return mergeColored(d);
+  };
+  if (q === 'low') return { body, detail: far() };
+  const d = base();
+  const trim = '#f2efe8', glass = '#2b4566';
+  // tapered craftsman porch columns on brick piers, railing, fascia, door
+  for (const x of [-W / 2 + 0.8, 0, W / 2 - 0.8]) {
+    d.push([bevelBox(0.7, 1.0, 0.7, 0.08), '#a8553d', M.t(x, 1.3, D / 2 + 2.8)]);
+    d.push([new THREE.CylinderGeometry(0.17, 0.25, 1.6, 4).rotateY(Math.PI / 4), trim, M.t(x, 2.6, D / 2 + 2.8)]);
+  }
+  for (let x = -W / 2 + 1.2; x < W / 2 - 1; x += 0.3) if (Math.abs(x) > 0.5) d.push([new THREE.BoxGeometry(0.06, 0.6, 0.06), trim, M.t(x, 1.2, D / 2 + 2.9)]);
+  d.push([new THREE.BoxGeometry(W - 1.4, 0.08, 0.1), trim, M.t(0, 1.5, D / 2 + 2.9)]);
+  d.push([bevelBox(W + 1.3, 0.3, D + 1.3, 0.1), '#3d424c', M.t(0, H + 0.05, 0)]);
+  d.push([new THREE.BoxGeometry(1.2, 2.2, 0.2), '#7a2e1f', M.t(1.8, 1.9, D / 2 + 0.02)]);
+  for (let i = 0; i < 3; i++) d.push([new THREE.BoxGeometry(0.25, 0.2, 0.05), glass, M.t(1.8 + (i - 1) * 0.32, 2.6, D / 2 + 0.13)]);
+  winFine(d, -2.0, 2.2, D / 2 + 0.02, 2.6, 1.6, glass, trim, undefined, { lintel: '#d9cfb9' });
+  winFine(d, 0, 6.5, 3.02, 1.2, 1.0, glass, trim, undefined, { mullion: false });
+  const sideR = new THREE.Matrix4().makeRotationY(Math.PI / 2), sideL = new THREE.Matrix4().makeRotationY(-Math.PI / 2);
+  for (const z of [-3.5, 2.5]) {
+    winFine(d, -z, 2.3, W / 2 + 0.02, 1.4, 1.4, glass, trim, sideR, { mullion: false, lintel: '#d9cfb9' });
+    winFine(d, z, 2.3, W / 2 + 0.02, 1.4, 1.4, glass, trim, sideL, { mullion: false, lintel: '#d9cfb9' });
+  }
+  d.push([bevelBox(0.9, 2.2, 0.9, 0.08), '#8f4a35', M.t(-2.6, H + 2.6, -3)]);
+  return { body, detail: lodHint(mergeColored(d), far(), q === 'high' ? 110 : 70) };
 }
 
-/** Wooden frame house with a gable roof (siding color = instance tint). */
+/** Wooden frame house with a gable roof (siding colour = instance tint), porch and shutters. */
 export function frameHouse(): { body: THREE.BufferGeometry; detail: THREE.BufferGeometry } {
   const W = 7.5, H = 6, D = 12;
+  const q = houseQ();
   const gable = new THREE.BufferGeometry();
   const hw = W / 2, rh = 3.2;
   gable.setAttribute('position', new THREE.Float32BufferAttribute([-hw, 0, D / 2, hw, 0, D / 2, 0, rh, D / 2, hw, 0, -D / 2, -hw, 0, -D / 2, 0, rh, -D / 2], 3));
@@ -1788,18 +2406,37 @@ export function frameHouse(): { body: THREE.BufferGeometry; detail: THREE.Buffer
   ]);
   const roofL = new THREE.BoxGeometry(Math.hypot(hw, rh) + 0.6, 0.25, D + 0.8);
   const ang = Math.atan2(rh, hw);
-  const d: P = [
-    [roofL, '#8b3a2e', M.trs(-hw / 2, H + rh / 2 + 0.1, 0, 0, 0, ang)],
+  const base = (): P => [
+    [roofL.clone(), '#8b3a2e', M.trs(-hw / 2, H + rh / 2 + 0.1, 0, 0, 0, ang)],
     [roofL.clone(), '#8b3a2e', M.trs(hw / 2, H + rh / 2 + 0.1, 0, 0, 0, -ang)],
     [new THREE.BoxGeometry(W + 0.2, 0.3, 0.2), '#ffffff', M.t(0, H, D / 2 + 0.05)],
     [new THREE.BoxGeometry(1.2, 2.3, 0.2), '#2f4f8f', M.t(-2, 1.7, D / 2 + 0.02)],
     [new THREE.BoxGeometry(2.8, 0.6, 1.8), '#d8d0c2', M.t(-2, 0.3, D / 2 + 0.9)],
   ];
-  win(d, 1.6, 2.2, D / 2 + 0.02, 1.6, 1.7);
-  win(d, -1.6, 4.6, D / 2 + 0.02, 1.2, 1.4);
-  win(d, 1.6, 4.6, D / 2 + 0.02, 1.2, 1.4);
-  win(d, 0, 7.2, D / 2 + 0.02, 1.0, 1.0);
-  return { body, detail: mergeColored(d) };
+  const far = (): THREE.BufferGeometry => {
+    const d = base();
+    win(d, 1.6, 2.2, D / 2 + 0.02, 1.6, 1.7);
+    win(d, -1.6, 4.6, D / 2 + 0.02, 1.2, 1.4);
+    win(d, 1.6, 4.6, D / 2 + 0.02, 1.2, 1.4);
+    win(d, 0, 7.2, D / 2 + 0.02, 1.0, 1.0);
+    return mergeColored(d);
+  };
+  if (q === 'low') return { body, detail: far() };
+  const d = base();
+  const trim = '#ffffff', glass = '#2b4566', shutter = '#2f4f3f';
+  // porch roof on posts, rake boards, corner boards, shutters
+  d.push([bevelBox(4.2, 0.18, 2.2, 0.06), '#8b3a2e', M.trs(-1.2, 3.2, D / 2 + 1.1, 0.12, 0, 0)]);
+  for (const x of [-3.1, 0.7]) d.push([bevelBox(0.18, 2.9, 0.18, 0.04), trim, M.t(x, 1.75, D / 2 + 2.0)]);
+  for (const sx of [-1, 1]) {
+    d.push([new THREE.BoxGeometry(0.18, H, 0.18), trim, M.t(sx * (W / 2 + 0.02), H / 2, D / 2 + 0.02)]);
+    d.push([new THREE.BoxGeometry(Math.hypot(hw, rh) + 0.3, 0.22, 0.12), trim, M.trs(sx * hw / 2, H + rh / 2 + 0.02, D / 2 + 0.38, 0, 0, -sx * ang)]);
+  }
+  for (const [x, y, w, h] of [[1.6, 2.2, 1.6, 1.7], [-1.6, 4.6, 1.2, 1.4], [1.6, 4.6, 1.2, 1.4]] as const) {
+    winFine(d, x, y, D / 2 + 0.02, w, h, glass, trim);
+    for (const sx of [-1, 1]) d.push([bevelBox(0.42, h + 0.1, 0.08, 0.03), shutter, M.t(x + sx * (w / 2 + 0.38), y, D / 2 + 0.08)]);
+  }
+  winFine(d, 0, 7.2, D / 2 + 0.02, 1.0, 1.0, glass, trim, undefined, { mullion: false });
+  return { body, detail: lodHint(mergeColored(d), far(), q === 'high' ? 110 : 70) };
 }
 
 

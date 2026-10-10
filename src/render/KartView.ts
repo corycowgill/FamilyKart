@@ -5,10 +5,13 @@ import { buildCharacter } from './models/characterModels';
 import { buildKart } from './models/kartModels';
 import { optimizeKartRig } from './models/optimize';
 import type { CharacterRig, KartRig } from './models/types';
-import { sprayColor, type Effects } from './Particles';
+import { sprayColor, SPRITE, type Effects } from './Particles';
+import { createShieldMaterial } from './vfx/Shield';
+import { WindVolume } from './vfx/Wind';
 
-const DRIFT_COLORS = ['#fff4d0', '#4fb4ff', '#ff9a2e', '#c45cff'];
+export const DRIFT_COLORS = ['#fff4d0', '#4fb4ff', '#ff9a2e', '#d05cff'];
 const tmp = new THREE.Vector3();
+const tmp2 = new THREE.Vector3();
 
 /** Visual representation of one kart + driver, driven from interpolated sim state. */
 export class KartView {
@@ -17,6 +20,14 @@ export class KartView {
   readonly character: CharacterRig;
   private wheelSpin = 0;
   private shield: THREE.Mesh;
+  private shieldMat: ReturnType<typeof createShieldMaterial>;
+  /** >0 while the shield bursts after blocking a hit */
+  private shieldPop = 0;
+  private wind: WindVolume | null = null;
+  private tornado: WindVolume | null = null;
+  /** seconds left of the Windy City Gust "blown" state (set by the session each frame) */
+  blown = 0;
+  private quality: 'low' | 'medium' | 'high';
   private flames: THREE.Mesh[] = [];
   private flameCores: THREE.Mesh[] = [];
   private flameGlows: THREE.Sprite[] = [];
@@ -36,6 +47,7 @@ export class KartView {
 
   constructor(private state: KartState, showLabel: boolean, quality: 'low' | 'medium' | 'high' = 'high') {
     const def = characterById(state.character);
+    this.quality = quality;
     this.kart = buildKart(def);
     this.character = buildCharacter(state.character);
     this.kart.seat.add(this.character.root);
@@ -71,14 +83,18 @@ export class KartView {
       };
     }
 
-    const shieldMat = new THREE.MeshPhysicalMaterial({
-      color: '#9fe8ff', transparent: true, opacity: 0.28, roughness: 0.05, metalness: 0, transmission: 0, clearcoat: 1,
-      emissive: '#4fc8ff', emissiveIntensity: 0.25, depthWrite: false, side: THREE.DoubleSide,
-    });
-    this.shield = new THREE.Mesh(new THREE.SphereGeometry(1.9, 24, 16), shieldMat);
+    this.shieldMat = createShieldMaterial();
+    this.shield = new THREE.Mesh(new THREE.SphereGeometry(1.9, quality === 'low' ? 20 : 32, quality === 'low' ? 14 : 22), this.shieldMat);
     this.shield.position.y = 1.0;
     this.shield.visible = false;
+    this.shield.renderOrder = 8;
     this.root.add(this.shield);
+    // wind lines streaming past the player's kart at high speed (stylised speed lines in 3D)
+    if (state.isHuman && quality !== 'low') {
+      this.wind = new WindVolume({ kind: 'tunnel', radius: 2.3, length: 10, lanes: quality === 'high' ? 26 : 18, density: 0.3, color: '#ffffff' });
+      this.wind.mesh.position.set(0, 0.9, 1.2);
+      this.root.add(this.wind.mesh);
+    }
 
     // layered boost flame: coloured outer cone + white-hot core + additive glow sprite (blooms)
     const flameMat = new THREE.MeshBasicMaterial({ color: '#ffb02e', transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -163,13 +179,23 @@ export class KartView {
     for (const w of this.kart.wheels) w.rotation.x = this.wheelSpin;
     for (const p of this.kart.frontPivots) p.rotation.y = -k.steerVisual * 0.45;
 
-    // shield
-    this.shield.visible = k.shieldTime > 0;
+    // shield (fresnel hex bubble; bursts with a ripple when it blocks a hit)
+    const shieldOn = k.shieldTime > 0;
+    if (this.shieldPop > 0) this.shieldPop = Math.max(0, this.shieldPop - dt);
+    this.shield.visible = shieldOn || this.shieldPop > 0;
     if (this.shield.visible) {
-      const s = 1 + Math.sin(time * 6) * 0.03;
+      this.shieldMat.tick(dt, time);
+      let s = 1 + Math.sin(time * 6) * 0.03;
+      let op = shieldOn && k.shieldTime < 1.5 && Math.floor(time * 10) % 2 ? 0.35 : 1;
+      if (!shieldOn) {
+        // burst: swell and fade out
+        const t = 1 - this.shieldPop / 0.45;
+        s *= 1 + t * 0.6;
+        op = (1 - t) * 1.4;
+      }
       this.shield.scale.set(s, s, s);
-      this.shield.rotation.y = time;
-      (this.shield.material as THREE.MeshPhysicalMaterial).opacity = k.shieldTime < 1.5 && Math.floor(time * 10) % 2 ? 0.1 : 0.28;
+      this.shield.rotation.y = time * 0.6;
+      this.shieldMat.uniforms.opacity.value = op;
     }
     // invulnerability flicker
     const flicker = k.invulnTime > 0 && k.spinTime <= 0 && k.respawnTime <= 0 && Math.floor(time * 16) % 2 === 0;
@@ -179,18 +205,19 @@ export class KartView {
     const boosting = k.boostTime > 0;
     const flameColor = k.boostKind === 'drift3' ? '#d070ff' : k.boostKind === 'drift2' ? '#ff8a2e' : k.boostKind === 'drift1' ? '#58b8ff' : k.boostKind === 'rocket' ? '#ff4a2e' : '#ffb02e';
     const big = k.boostKind === 'rocket' || k.boostKind === 'special' || k.boostKind === 'drift3';
+    const bigger = k.boostKind === 'rocket' || (k.boostKind === 'special' && k.character === 'dad');
     this.flames.forEach((f, i) => {
       f.visible = boosting;
       const g = this.flameGlows[i];
       g.visible = boosting;
       if (boosting) {
-        const sc = 0.8 + Math.random() * 0.6 + (big ? 0.8 : 0);
-        const w = 1 + (big ? 0.35 : 0) + Math.random() * 0.15;
+        const sc = 0.8 + Math.random() * 0.6 + (big ? 0.8 : 0) + (bigger ? 0.9 : 0);
+        const w = 1 + (big ? 0.35 : 0) + (bigger ? 0.4 : 0) + Math.random() * 0.15;
         f.scale.set(w, w, sc);
         (f.material as THREE.MeshBasicMaterial).color.set(flameColor).multiplyScalar(1.8);
         const gm = g.material as THREE.SpriteMaterial;
         gm.color.set(flameColor).multiplyScalar(1.4);
-        g.scale.setScalar((big ? 1.3 : 0.9) * (0.9 + Math.random() * 0.2));
+        g.scale.setScalar((bigger ? 1.9 : big ? 1.3 : 0.9) * (0.9 + Math.random() * 0.2));
       }
     });
 
@@ -205,22 +232,65 @@ export class KartView {
       boosting, reaction: k.reaction, reactionTime: k.reactionTime, time,
     });
 
+    // speed wind lines (player karts): fade in near top speed, full on boost
+    if (this.wind) {
+      const sp01 = Math.max(0, speed) / k.tuning.maxSpeed;
+      const amt = respawning ? 0 : Math.min(1, Math.max(0, (sp01 - 0.72) / 0.28) * 0.55 + (boosting ? 0.6 : 0));
+      this.wind.uniforms.color.value.set(boosting ? flameColor : '#ffffff').multiplyScalar(1.6);
+      this.wind.set(amt * (this.quality === 'high' ? 0.75 : 0.55), time, 2.2 + sp01 * 2.5);
+    }
+    // gust victims: a swirling little twister around the kart
+    if (this.blown > 0 && this.quality !== 'low' && !this.tornado) {
+      this.tornado = new WindVolume({ kind: 'tornado', radius: 1.8, length: 3.6, lanes: 14, swirl: 0.6, density: 0.45, color: '#e9f6ff' });
+      this.root.add(this.tornado.mesh);
+    }
+    if (this.tornado) this.tornado.set(Math.min(1, this.blown * 2.5) * 0.9, time, 1.2, -1.6);
+
     if (!fx || respawning) return;
-    // particles: drift sparks & smoke, boost fire, offroad dust
+    this.emitParticles(dt, time, fx, flameColor, boosting, bigger);
+  }
+
+  /** Particles: drift sparks & tyre smoke, boost fire, wind trails, off-road spray, spin stars, auras. */
+  private emitParticles(dt: number, time: number, fx: Effects, flameColor: string, boosting: boolean, bigger: boolean): void {
+    const k = this.state;
+    const speed = k.forwardSpeed;
     const emitRate = Math.min(1, dt * 60);
+    const D = fx.density;
+    const lowQ = fx.quality === 'low';
+    const fwx = Math.sin(this.interpYaw), fwz = Math.cos(this.interpYaw);
     const skids = fx.skids;
     if (k.drift.active && k.grounded) {
+      const tier = k.drift.tier;
       this.kart.rearContacts.forEach((rc, wi) => {
         rc.getWorldPosition(tmp);
         skids?.add(k.id * 2 + wi, tmp.x, k.groundY + 0.1, tmp.z);
-        if (Math.random() < 0.7 * emitRate) {
-          fx.smoke.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, spread: 0.6, vy: 1.2, color: '#e8e8e8', size: 0.9, life: 0.7, grow: 2.4, drag: 2 });
+        // billowing cel-shaded tyre smoke
+        if (Math.random() < 0.25 * emitRate * D) {
+          fx.puff(tmp.x, tmp.y + 0.2, tmp.z, k.surface === 'road' ? '#e4e6ec' : sprayColor(fx.theme, k.surface).color, 0.36 + tier * 0.05, {
+            vx: -fwx * 3, vz: -fwz * 3, vy: 0.8, spread: 0.5, life: 0.5 + tier * 0.06, grow: 2.0, opacity: 0.75,
+          });
         }
-        if (k.drift.tier > 0) {
-          const c = DRIFT_COLORS[k.drift.tier];
-          fx.glow.emit({ x: tmp.x, y: tmp.y + 0.15, z: tmp.z, spread: 2.5, vy: 2.5, color: c, size: 0.35 + k.drift.tier * 0.08, life: 0.35, gravity: 12, drag: 2, count: k.drift.tier + 1 });
-        } else if (Math.random() < 0.4) {
-          fx.glow.emit({ x: tmp.x, y: tmp.y + 0.15, z: tmp.z, spread: 1.5, vy: 1.5, color: '#fff2b0', size: 0.2, life: 0.25, gravity: 10 });
+        // outward direction of this wheel (sparks fan out behind and to the side)
+        const side = wi === 0 ? -1 : 1;
+        const ox = fwz * side, oz = -fwx * side;
+        if (tier > 0) {
+          const c = DRIFT_COLORS[tier];
+          const n = fx.n(tier * 2 + 1);
+          for (let i = 0; i < n; i++) {
+            fx.glow.emit({
+              x: tmp.x, y: tmp.y + 0.15, z: tmp.z, vx: -fwx * (5 + tier * 2) + ox * 3, vz: -fwz * (5 + tier * 2) + oz * 3, vy: 2.5 + Math.random() * (2 + tier),
+              spread: 2.6, color: '#ffffff', color2: c, size: 0.3 + tier * 0.07, life: 0.3 + tier * 0.05, gravity: 16, drag: 1.2, stretch: 1.6, floor: k.groundY + 0.05,
+            });
+          }
+          // stylised wheel flame / glow (Mario Kart style) grows with the tier
+          if (!lowQ && Math.random() < 0.8 * emitRate) {
+            fx.glow.emit({ x: tmp.x - fwx * 0.3, y: tmp.y + 0.35, z: tmp.z - fwz * 0.3, vx: -fwx * 3, vz: -fwz * 3, vy: 1.5, color: '#ffffff', color2: c, sprite: tier >= 2 ? SPRITE.FLAME : SPRITE.SOFT, size: 0.6 + tier * 0.3, life: 0.14, curve: 'flash' });
+          }
+          if (tier === 3 && !lowQ && Math.random() < 0.25 * emitRate) {
+            fx.glow.emit({ x: tmp.x, y: tmp.y + 0.4, z: tmp.z, vy: 3, spread: 1.5, color: '#ffb8ff', sprite: SPRITE.SPARKLE, size: 0.45, life: 0.4, spin: 4, curve: 'shrink' });
+          }
+        } else if (Math.random() < 0.35) {
+          fx.glow.emit({ x: tmp.x, y: tmp.y + 0.15, z: tmp.z, vx: -fwx * 3, vz: -fwz * 3, spread: 1.5, vy: 1.5, color: '#fff2b0', size: 0.14, life: 0.22, gravity: 10, stretch: 1 });
         }
       });
     } else if (skids) {
@@ -257,29 +327,83 @@ export class KartView {
       this.trailPrev[0] = this.trailPrev[1] = null;
     }
     if (boosting) {
+      const rocket = k.boostKind === 'rocket';
       for (const ex of this.kart.exhausts) {
         ex.getWorldPosition(tmp);
-        fx.glow.emit({ x: tmp.x, y: tmp.y, z: tmp.z, vx: -Math.sin(this.interpYaw) * 4, vz: -Math.cos(this.interpYaw) * 4, spread: 0.8, color: flameColor, size: 0.45, life: 0.25, drag: 3, count: 2 });
+        const bx = -fwx * 5, bz = -fwz * 5;
+        // layered exhaust: toon flame tongues + hot sparks (+ thick fire trail and smoke for rockets / Dad)
+        fx.glow.emit({ x: tmp.x, y: tmp.y, z: tmp.z, vx: bx, vz: bz, vy: 0.6, spread: 0.6, color: '#fff3c0', color2: flameColor, sprite: SPRITE.FLAME, size: bigger ? 0.9 : 0.55, life: bigger ? 0.32 : 0.2, drag: 3, grow: 0.5, count: lowQ ? 1 : 2 });
+        if (!lowQ && Math.random() < 0.5 * D) fx.glow.emit({ x: tmp.x, y: tmp.y, z: tmp.z, vx: bx * 1.4, vz: bz * 1.4, vy: 1.5, spread: 1.5, color: flameColor, size: 0.12, life: 0.35, gravity: 4, stretch: 1 });
+        if (bigger) {
+          fx.glow.emit({ x: tmp.x - fwx * 0.6, y: tmp.y, z: tmp.z - fwz * 0.6, vx: bx * 0.6, vz: bz * 0.6, vy: 0.8, spread: 0.8, color: '#ffe08a', color2: rocket ? '#ff3a1a' : '#ff7a1a', sprite: SPRITE.FLAME, size: 1.3, life: 0.4, drag: 2.5, grow: 0.6, count: fx.n(2) });
+          if (Math.random() < 0.6 * emitRate * D) fx.puff(tmp.x - fwx * 1.2, tmp.y + 0.2, tmp.z - fwz * 1.2, rocket ? '#c9c2d2' : '#ddd4d8', 0.6, { vx: bx * 0.2, vz: bz * 0.2, vy: 1.5, spread: 0.6, life: 0.9, grow: 2.4 });
+        }
       }
     }
     const special = k.surface === 'ice' || k.surface === 'milk' || k.surface === 'mud';
     if ((k.offroad || special) && k.grounded && Math.abs(speed) > 5) {
-      // ground spray by surface / theme: grass bits, dirt, snow powder, milk splashes, ice glitter
+      // ground spray by surface / theme: grass bits + leaves, dirt clods, snow powder, milk splashes, ice glitter
       const sc = sprayColor(fx.theme, k.surface);
       const rc = this.kart.rearContacts[Math.random() < 0.5 ? 0 : 1];
       rc.getWorldPosition(tmp);
       const back = Math.min(1, Math.abs(speed) / 25);
-      const vx = -Math.sin(this.interpYaw) * 3 * back, vz = -Math.cos(this.interpYaw) * 3 * back;
+      const vx = -fwx * 3 * back, vz = -fwz * 3 * back;
       if (k.offroad || k.surface !== 'ice') {
-        fx.smoke.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, vx, vz, spread: 0.8, vy: 1.5 + back, color: sc.color, size: 0.8, life: 0.6, grow: 2, drag: 2 });
+        if (Math.random() < 0.6 * emitRate) fx.smoke.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, vx, vz, spread: 0.8, vy: 1.5 + back, color: sc.color, sprite: SPRITE.DUST, size: 0.55, life: 0.55, grow: 2, drag: 2, curve: 'shrink', spin: 1 });
       }
-      if (sc.glow && fx.quality !== 'low' && Math.random() < 0.6) {
-        fx.glow.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, vx: vx * 1.5, vz: vz * 1.5, spread: 1.2, vy: 2.5, color: sc.glow, size: 0.18, life: 0.45, gravity: 9, drag: 1 });
+      if (!lowQ && Math.random() < 0.6 * D) {
+        if (sc.chunk) fx.smoke.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, vx: vx * 1.6, vz: vz * 1.6, vy: 3 + back * 2, spread: 1.4, color: sc.chunk, sprite: sc.sprite ?? SPRITE.SHARD, size: 0.22, life: 0.6, gravity: 14, spin: 10, floor: k.groundY + 0.05 });
+        if (sc.glow) fx.glow.emit({ x: tmp.x, y: tmp.y + 0.2, z: tmp.z, vx: vx * 1.5, vz: vz * 1.5, spread: 1.2, vy: 2.5, color: sc.glow, sprite: sc.sprite ?? SPRITE.SOFT, size: 0.22, life: 0.45, gravity: 9, drag: 1, spin: 4, stretch: k.surface === 'milk' ? 1 : 0 });
       }
     }
-    if (k.spinTime > 0 && Math.random() < 0.5) {
-      fx.glow.emit({ x: this.interpPos.x, y: this.interpPos.y + 2.4, z: this.interpPos.z, spread: 1.2, color: '#ffe14a', size: 0.4, life: 0.4 });
+    if (k.spinTime > 0) {
+      // dizzy star swirl around the head
+      for (let i = 0; i < 3; i++) {
+        const a = time * 9 + (i * Math.PI * 2) / 3;
+        fx.glow.emit({ x: this.interpPos.x + Math.cos(a) * 0.9, y: this.interpPos.y + 2.3, z: this.interpPos.z + Math.sin(a) * 0.9, color: '#ffe14a', sprite: SPRITE.STAR, size: 0.42, life: 0.16, curve: 'flash' });
+      }
     }
+    if (this.blown > 0 && Math.random() < 0.6 * emitRate * D) {
+      const a = time * 7 + Math.random() * 6;
+      fx.smoke.emit({ x: this.interpPos.x + Math.cos(a) * 1.6, y: this.interpPos.y + 0.4 + Math.random() * 2, z: this.interpPos.z + Math.sin(a) * 1.6, vx: -Math.sin(a) * 6, vz: Math.cos(a) * 6, vy: 2, color: Math.random() < 0.5 ? '#e8a43a' : '#9ccf4a', sprite: SPRITE.LEAF, size: 0.32, life: 0.6, drag: 1, spin: 8 });
+    }
+    if (k.turboDriftTime > 0 && Math.random() < 0.7 * emitRate) {
+      // Turbo Drift: purple aura licking up around the kart
+      const a = Math.random() * Math.PI * 2;
+      fx.glow.emit({ x: this.interpPos.x + Math.cos(a) * 1.2, y: this.interpPos.y + 0.3, z: this.interpPos.z + Math.sin(a) * 1.4, vy: 2.5, spread: 0.3, color: '#e0a0ff', color2: '#7a2cff', sprite: SPRITE.FLAME, size: 0.7, life: 0.35, curve: 'shrink' });
+      if (!lowQ) fx.glow.emit({ x: this.interpPos.x, y: this.interpPos.y + 1, z: this.interpPos.z, spread: 1.6, vy: 1.5, color: '#d58bff', sprite: SPRITE.SPARKLE, size: 0.35, life: 0.45, spin: 5, curve: 'shrink' });
+    }
+    if (k.itemRoulette > 0 && k.isHuman && Math.random() < 0.6 * emitRate) {
+      // mystery roulette: rainbow sparkles popping above the driver
+      const hue = (time * 1.5) % 1;
+      fx.glow.emit({ x: this.interpPos.x, y: this.interpPos.y + 2.8, z: this.interpPos.z, spread: 1.4, vy: 1.2, color: new THREE.Color().setHSL(hue, 0.9, 0.6), sprite: Math.random() < 0.5 ? SPRITE.STAR : SPRITE.SPARKLE, size: 0.38, life: 0.5, spin: 6, curve: 'shrink' });
+    }
+    void tmp2;
+  }
+
+  /** Shield blocked a hit: ripple from `from` (world position of the threat, optional) and burst. */
+  shieldBlock(from?: THREE.Vector3, keep = false): void {
+    const dir = from ? tmp2.copy(from).sub(this.interpPos) : tmp2.set(Math.random() - 0.5, 0.3, Math.random() - 0.5);
+    // into the shield's local (rotating) frame
+    dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), -(this.interpYaw + this.shield.rotation.y));
+    if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1);
+    this.shieldMat.ripple(dir);
+    if (!keep) this.shieldPop = 0.45;
+  }
+
+  /** Shield colours: item bubble (cyan/violet) or Mom's special (pink/gold). */
+  setShieldStyle(style: 'bubble' | 'mom'): void {
+    this.shieldMat.uniforms.color.value.set(style === 'mom' ? '#ff6fc8' : '#5fd2ff');
+    this.shieldMat.uniforms.color2.value.set(style === 'mom' ? '#ffd36a' : '#c58bff');
+  }
+
+  /** World position between the exhausts (heat shimmer anchor). */
+  exhaustWorld(out: THREE.Vector3): THREE.Vector3 {
+    const ex = this.kart.exhausts;
+    if (!ex.length) return out.copy(this.interpPos).add(tmp.set(-Math.sin(this.interpYaw) * 1.3, 0.5, -Math.cos(this.interpYaw) * 1.3));
+    out.set(0, 0, 0);
+    for (const e of ex) out.add(e.getWorldPosition(tmp));
+    return out.multiplyScalar(1 / ex.length);
   }
 
   dispose(): void {
@@ -287,6 +411,9 @@ export class KartView {
     this.kart.dispose();
     this.character.dispose();
     this.shield.geometry.dispose();
+    this.shieldMat.dispose();
+    this.wind?.dispose();
+    this.tornado?.dispose();
     this.root.traverse((o) => {
       if (o instanceof THREE.Mesh && o.material instanceof THREE.Material && (o === this.shadowBlob || this.flames.includes(o) || this.flameCores.includes(o))) {
         o.geometry.dispose();

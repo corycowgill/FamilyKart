@@ -9,6 +9,7 @@ import {
   aonCenter, bannerBatch, beefStand, bluesClub, pizzeria, chicagoTheatre, cloudGate, CTA, dibsGeo, elevatedL, glassSpireTower, hancockCenter, hotDogStand, Kit, marinaCity,
   rooftopTankGeo, tribuneTower, willisTower, wrigleyBuilding,
   runningDogs,
+  streetLife,
 } from './chicagoLandmarks';
 
 type P = Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>;
@@ -565,6 +566,7 @@ export function buildSnow(ctx: SceneryContext): SceneryHandle {
   /* ------------------------------------------------ MOAR Chicago life: huskies loving the snow */
   if (!lo) runningDogs(kit, (x, z) => field.height(x, z), placer.scatter(hi ? 8 : 4, { minX: b.minX - 30, maxX: b.maxX + 30, minZ: b.minZ - 30, maxZ: b.maxZ + 30 }, 8, 3), { breeds: ['husky', 'lab', 'husky', 'doodle'], seed: 2025 });
 
+  streetLife(kit, placer, { snow: true, sparse: 1.3, ads: [['#d7263d', '#ffffff'], ['#1f8a4c', '#ffd23f'], ['#2f6fd6', '#ffffff']] });
   kit.flush();
 
   if (parts.length) {

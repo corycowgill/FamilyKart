@@ -8,7 +8,9 @@ import { canvasTexture, noiseTexture, textTexture } from './textures';
 import {
   aonCenter, buildChicagoFlag, CTA, elevatedL, buildLakeMichigan, dogGeo, dogMat, type DogBreed, faceRoad, findSpot, glassSpireTower, hancockCenter, hazeObject, hotDogStand,
   Kit, kites, lifeguardGeo, lighthouse, marinaCity, parkDistrictSign, seagulls, tribuneTower, wavyTower, willisTower,
+  edgeGrass,
 } from './chicagoLandmarks';
+import { canopy, grassTuft, mergeVC, wildflowerClump } from './props';
 
 type P = Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>;
 
@@ -329,12 +331,16 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
       [new THREE.CylinderGeometry(0.05, 0.05, 0.7, 4), '#3f8f3a', M.t(-0.4, 0.35, -0.3)],
       [new THREE.IcosahedronGeometry(0.3, 0), '#ffffff', M.t(-0.4, 0.75, -0.3)],
     ]));
-    const flowers = new Batch(flowerGeo, vc, { cast: false });
+    if (!lo) {
+      flowerGeo.dispose();
+    }
+    const flowers = new Batch(lo ? flowerGeo : bag.add(wildflowerClump(quality)), vc, { cast: false });
     for (const s of placer.scatter(Math.round(500 * density), { minX: b.minX - 60, maxX: b.maxX + 60, minZ: b.minZ - 60, maxZ: b.maxZ + 60 }, 0.6, 0.8, Infinity, 6, false)) {
       if (field.channelAt(s.x, s.z) || onBeach(s.x)) continue;
       flowers.add(s.x, s.y, s.z, s.yaw, rng.range(1.5, 2.5), rng.range(1.5, 2.5), rng.range(1.5, 2.5), rng.pick(['#ff6fa8', '#ffd23f', '#ffffff', '#b48cff', '#ff8a3d']));
     }
     flowers.build(group);
+    edgeGrass(kit, placer, { base: '#3f8f34', tip: '#b2e07a', flowers: ['#ff6fa8', '#ffd23f', '#ffffff', '#b48cff'], spacing: 1.2 });
     // rocks along the creek
     const rocks = new Batch(bag.add(new THREE.DodecahedronGeometry(1, 0)), bag.add(new THREE.MeshStandardMaterial({ color: '#9a9a92', roughness: 0.95, flatShading: true })), { cast: false });
     for (const c of field.channels) {
@@ -554,11 +560,16 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
 
     /* ---------- dunes with marram grass between the park and the sand */
     {
-      const dune = kit.batch(mergeColored([
+      const dune = kit.batch(lo ? mergeColored([
         [new THREE.IcosahedronGeometry(1, 1), '#d6b97c', M.trs(0, 0, 0, 0, 0, 0, 1, 0.34, 1)],
         [new THREE.IcosahedronGeometry(0.8, 1), '#8fb352', M.trs(0.1, 0.1, 0.05, 0, 0, 0, 1, 0.34, 1)],
+      ]) : mergeVC([
+        canopy([{ x: 0, y: 0, z: 0, r: 1, sy: 0.34 }], '#cdb073', '#f6e2ae', 2, 5, { center: new THREE.Vector3(0, -1, 0), bumpy: 0.25, soft: 0.85 }),
+        canopy([{ x: 0.1, y: 0.1, z: 0.05, r: 0.8, sy: 0.34 }], '#6f9a3c', '#a8cc66', 1, 6, { center: new THREE.Vector3(0, -1, 0), bumpy: 0.4, soft: 0.8 }),
       ]), kit.solidMat, { cast: false, name: 'dunes' });
-      const tuft = kit.batch(mergeColored([0, 1, 2, 3, 4].map((i) => [new THREE.ConeGeometry(0.08, 1.4, 3), i % 2 ? '#a9c25e' : '#8aa84a', M.trs(Math.cos(i * 1.3) * 0.25, 0.65, Math.sin(i * 1.3) * 0.25, Math.cos(i) * 0.3, 0, Math.sin(i) * 0.3)] as [THREE.BufferGeometry, string, THREE.Matrix4])), kit.solidMat, { cast: false, name: 'marram' });
+      const tuft = kit.batch(lo
+        ? mergeColored([0, 1, 2, 3, 4].map((i) => [new THREE.ConeGeometry(0.08, 1.4, 3), i % 2 ? '#a9c25e' : '#8aa84a', M.trs(Math.cos(i * 1.3) * 0.25, 0.65, Math.sin(i * 1.3) * 0.25, Math.cos(i) * 0.3, 0, Math.sin(i) * 0.3)] as [THREE.BufferGeometry, string, THREE.Matrix4]))
+        : grassTuft('#7f9a44', '#d9d796', quality, { h: 0.85, blades: hi ? 10 : 7, seed: 31, spread: 0.3 }), kit.solidMat, { cast: false, name: 'marram' });
       for (let z = z0 + 200; z < z1 - 200; z += rng.range(10, 18) * (lo ? 2 : 1)) {
         const x = sandX + rng.range(-4, 10);
         if (!placer.ok(x, z, 6, 3)) continue;

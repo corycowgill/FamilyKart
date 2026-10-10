@@ -1,7 +1,7 @@
 import type * as THREE from 'three';
 import type { CharacterId } from '../../sim/types';
 import type { LiveryId } from './liveries';
-import { canvasTex, drawEmblem, type EmblemKind } from './textures';
+import { canvasTex, drawEmblem, texScale, type EmblemKind } from './textures';
 
 /**
  * Livery decals (transparent canvas textures): a hood graphic and a side graphic per livery.
@@ -367,7 +367,7 @@ export function liveryHoodTexture(liv: LiveryId, id: CharacterId, aspect: number
         break;
       }
     }
-  });
+  }, { scale: texScale('decal') });
 }
 
 /** Side decal (512x160, transparent) for a livery. */
@@ -472,7 +472,7 @@ export function liverySideTexture(liv: LiveryId, id: CharacterId, emblem: Emblem
         roundel(ctx, id, emblem, rx, ry, 40, '#9aa3ad');
         break;
     }
-  });
+  }, { scale: texScale('decal') });
 }
 
 /** Little double-sided Chicago flag for the flag accessory. */

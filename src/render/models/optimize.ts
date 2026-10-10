@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { enableAutoLod } from './lod';
+import { cachedGeo } from './materials';
 import type { CharacterAnimState, CharacterRig, KartRig } from './types';
 
 /**
@@ -12,6 +14,10 @@ import type { CharacterAnimState, CharacterRig, KartRig } from './types';
  * siblings sharing a material are merged into one mesh under that same parent. Animated nodes
  * (and anything listed in `keep`) are left untouched, so the rig code's references stay valid.
  * Materials are shared, not cloned, so property tweaks (face texture swaps, colour pulses) still apply.
+ *
+ * Level of detail: every `THREE.LOD` and each of its level objects is a merge anchor, so meshes are
+ * only ever merged within one detail level (the LOD keeps switching whole level groups). By the rig
+ * contract (see lod.ts) nothing below an LOD level moves, so those subtrees are not probed.
  */
 export function mergeStaticMeshes(root: THREE.Object3D, probe: (sample: () => void) => void, keep: Iterable<THREE.Object3D> = []): { before: number; after: number } {
   interface Snap { e: number[]; visible: boolean; material: unknown; geometry: unknown }
@@ -22,7 +28,17 @@ export function mergeStaticMeshes(root: THREE.Object3D, probe: (sample: () => vo
     const m = o as THREE.Mesh;
     return { e: Array.from(o.matrix.elements), visible: o.visible, material: m.material, geometry: m.geometry };
   };
-  root.traverse((o) => snaps.set(o, snap(o)));
+  // LODs + their level groups are anchors; their (static) contents are not probed
+  const probeTree = (o: THREE.Object3D) => {
+    if ((o as THREE.LOD).isLOD) {
+      animated.add(o);
+      for (const l of (o as THREE.LOD).levels) animated.add(l.object);
+      return;
+    }
+    snaps.set(o, snap(o));
+    for (const c of o.children) probeTree(c);
+  };
+  probeTree(root);
   const sample = () => {
     for (const [o, s] of snaps) {
       if (animated.has(o)) continue;
@@ -56,7 +72,9 @@ export function mergeStaticMeshes(root: THREE.Object3D, probe: (sample: () => vo
     if (!g.attributes.position) return;
     const anchor = anchorOf(m);
     anchors.set(m, anchor);
-    const key = [anchor.uuid, (m.material as THREE.Material).uuid, m.castShadow, m.receiveShadow, m.renderOrder, m.frustumCulled].join('|');
+    // shadow flags are not part of the key (tiny no-shadow details would otherwise cost extra draw calls);
+    // the merged mesh casts / receives if any part did
+    const key = [anchor.uuid, (m.material as THREE.Material).uuid, m.renderOrder, m.frustumCulled].join('|');
     let arr = groups.get(key);
     if (!arr) groups.set(key, (arr = []));
     arr.push(m);
@@ -74,8 +92,8 @@ export function mergeStaticMeshes(root: THREE.Object3D, probe: (sample: () => vo
     const first = meshes[0];
     const mesh = new THREE.Mesh(merged, first.material);
     mesh.name = 'merged-static';
-    mesh.castShadow = first.castShadow;
-    mesh.receiveShadow = first.receiveShadow;
+    mesh.castShadow = meshes.some((m) => m.castShadow);
+    mesh.receiveShadow = meshes.some((m) => m.receiveShadow);
     mesh.renderOrder = first.renderOrder;
     mesh.frustumCulled = first.frustumCulled;
     anchor.add(mesh);
@@ -91,17 +109,124 @@ export function mergeStaticMeshes(root: THREE.Object3D, probe: (sample: () => vo
 }
 
 
-/** Bring a geometry to a common layout (non-indexed position/normal/uv[/color]) so siblings can merge. */
+/**
+ * Build-time merge inside every LOD level: everything below a level object is static relative to it
+ * (rig contract), so its visible leaf meshes are merged per material. This keeps the draw calls of
+ * un-optimised close-up rigs (showroom, podium, portraits, ghost) low. Merged geometry is cached under
+ * `rigKey` when the material is shared, so identical racers share one copy.
+ */
+export function mergeLodLevels(root: THREE.Object3D, rigKey: string): void {
+  const lods: THREE.LOD[] = [];
+  root.traverse((o) => {
+    if ((o as THREE.LOD).isLOD) lods.push(o as THREE.LOD);
+  });
+  root.updateMatrixWorld(true);
+  const pathOf = (o: THREE.Object3D): string => {
+    const parts: number[] = [];
+    while (o !== root && o.parent) {
+      parts.push(o.parent.children.indexOf(o));
+      o = o.parent;
+    }
+    return parts.reverse().join('.');
+  };
+  for (const lod of lods) {
+    const path = pathOf(lod);
+    for (const level of lod.levels) {
+      const lg = level.object;
+      const inv = new THREE.Matrix4().copy(lg.matrixWorld).invert();
+      const groups = new Map<string, THREE.Mesh[]>();
+      lg.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || (m as unknown as THREE.InstancedMesh).isInstancedMesh || !m.visible || m.children.length || Array.isArray(m.material)) return;
+        if (!m.geometry?.attributes.position || m.geometry.morphAttributes.position) return;
+        const key = [(m.material as THREE.Material).uuid, m.renderOrder, m.frustumCulled].join('|');
+        let arr = groups.get(key);
+        if (!arr) groups.set(key, (arr = []));
+        arr.push(m);
+      });
+      let gi = 0;
+      for (const meshes of groups.values()) {
+        gi++;
+        if (meshes.length < 2) continue;
+        const first = meshes[0];
+        const mat = first.material as THREE.MeshStandardMaterial;
+        const make = () => {
+          const geos = meshes.map((m) => normalize(m.geometry, new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld), !!mat.vertexColors));
+          const merged = mergeGeometries(geos, false);
+          geos.forEach((g) => g.dispose());
+          return merged;
+        };
+        const merged = mat.userData.shared ? cachedGeo(`lvmerge:${rigKey}:${path}:${lg.name}:${gi}:${mat.uuid}`, () => make() ?? new THREE.BufferGeometry()) : make();
+        if (!merged || !merged.attributes.position) continue;
+        const mesh = new THREE.Mesh(merged, first.material);
+        mesh.name = 'merged-level';
+        mesh.castShadow = meshes.some((m) => m.castShadow);
+        mesh.receiveShadow = meshes.some((m) => m.receiveShadow);
+        mesh.renderOrder = first.renderOrder;
+        mesh.frustumCulled = first.frustumCulled;
+        lg.add(mesh);
+        for (const m of meshes) m.removeFromParent();
+      }
+    }
+  }
+}
+
+/** Bring a geometry to a common layout (non-indexed position/normal/uv[/color]) in `matrix` space, in one pass. */
+const _v = new THREE.Vector3();
+const _nm = new THREE.Matrix3();
 function normalize(src: THREE.BufferGeometry, matrix: THREE.Matrix4, wantColor: boolean): THREE.BufferGeometry {
-  const g = src.index ? src.toNonIndexed() : src.clone();
+  if (!src.attributes.normal) src.computeVertexNormals();
+  const pos = src.attributes.position;
+  const nrm = src.attributes.normal;
+  const uv = src.attributes.uv;
+  const col = src.attributes.color;
+  const index = src.index;
+  const n = index ? index.count : pos.count;
+  const P = new Float32Array(n * 3);
+  const N = new Float32Array(n * 3);
+  const U = new Float32Array(n * 2);
+  const C = wantColor ? new Float32Array(n * 3) : null;
+  _nm.getNormalMatrix(matrix);
+  for (let i = 0; i < n; i++) {
+    const j = index ? index.getX(i) : i;
+    _v.fromBufferAttribute(pos, j).applyMatrix4(matrix);
+    P[i * 3] = _v.x;
+    P[i * 3 + 1] = _v.y;
+    P[i * 3 + 2] = _v.z;
+    _v.fromBufferAttribute(nrm, j).applyMatrix3(_nm).normalize();
+    N[i * 3] = _v.x;
+    N[i * 3 + 1] = _v.y;
+    N[i * 3 + 2] = _v.z;
+    if (uv) {
+      U[i * 2] = uv.getX(j);
+      U[i * 2 + 1] = uv.getY(j);
+    }
+    if (C) {
+      C[i * 3] = col ? col.getX(j) : 1;
+      C[i * 3 + 1] = col ? col.getY(j) : 1;
+      C[i * 3 + 2] = col ? col.getZ(j) : 1;
+    }
+  }
   const out = new THREE.BufferGeometry();
-  const n = g.attributes.position.count;
-  out.setAttribute('position', g.attributes.position);
-  if (!g.attributes.normal) g.computeVertexNormals();
-  out.setAttribute('normal', g.attributes.normal);
-  out.setAttribute('uv', g.attributes.uv ?? new THREE.BufferAttribute(new Float32Array(n * 2), 2));
-  if (wantColor) out.setAttribute('color', g.attributes.color ?? new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
-  out.applyMatrix4(matrix);
+  out.setAttribute('position', new THREE.BufferAttribute(P, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(U, 2));
+  if (C) out.setAttribute('color', new THREE.BufferAttribute(C, 3));
+  // a mirroring transform flips the winding: swap two vertices per triangle
+  if (matrix.determinant() < 0) {
+    for (const a of [out.attributes.position, out.attributes.normal, out.attributes.uv, out.attributes.color]) {
+      if (!a) continue;
+      const arr = a.array as Float32Array;
+      const k = a.itemSize;
+      for (let t = 0; t + 2 < n; t += 3) {
+        for (let c = 0; c < k; c++) {
+          const tmp = arr[(t + 1) * k + c];
+          arr[(t + 1) * k + c] = arr[(t + 2) * k + c];
+          arr[(t + 2) * k + c] = tmp;
+        }
+      }
+    }
+  }
   return out;
 }
 
@@ -112,6 +237,8 @@ function normalize(src: THREE.BufferGeometry, matrix: THREE.Matrix4, wantColor: 
  */
 export function optimizeKartRig(kart: KartRig, character: CharacterRig): { before: number; after: number } {
   const keep = [kart.body, kart.seat, ...kart.wheels, ...kart.frontPivots, ...kart.exhausts, ...kart.rearContacts, character.root];
+  // in-race views pick the detail level by camera distance (rigs are built pinned to the top level)
+  enableAutoLod(kart.root);
   return mergeStaticMeshes(kart.root, (sample) => {
     const reactions: CharacterAnimState['reaction'][] = ['none', 'hit', 'item', 'overtake', 'jump', 'win', 'lose'];
     let time = 0;

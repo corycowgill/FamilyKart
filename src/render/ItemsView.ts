@@ -1,7 +1,50 @@
 import * as THREE from 'three';
 import type { RaceSim } from '../sim/race/RaceSim';
 import type { DroppedHazard, MovingHazard, Projectile } from '../sim/types';
-import type { Effects } from './Particles';
+import { SPRITE, type Effects } from './Particles';
+
+const BOX_COLORS = ['#ff4a5a', '#ffd23a', '#3ec1ff', '#7cff6a', '#e56cff'];
+
+/** Item box shatter: coloured glassy shards, sparkle stars and a quick ring flash. */
+export function shatterBox(fx: Effects, x: number, y: number, z: number): void {
+  const n = fx.n(22);
+  for (let i = 0; i < n; i++) {
+    const c = BOX_COLORS[i % BOX_COLORS.length];
+    fx.smoke.emit({ x, y, z, spread: 7, vy: 5, color: c, sprite: SPRITE.SHARD, size: 0.42, life: 0.9, gravity: 16, drag: 1.2, spin: 12, floor: y - 1.2 });
+  }
+  for (let i = 0; i < fx.n(14); i++) {
+    fx.glow.emit({ x, y, z, spread: 6, vy: 2, color: BOX_COLORS[i % 5], sprite: i % 2 ? SPRITE.SPARKLE : SPRITE.STAR, size: 0.55, life: 0.6, drag: 3, spin: 6, curve: 'shrink' });
+  }
+  fx.glow.emit({ x, y, z, color: '#fff2b0', sprite: SPRITE.BURST, size: 3.2, life: 0.22, curve: 'flash', grow: 1.5 });
+  fx.rings.spawn({ x, y, z, color: '#ffe27a', size: 2.6, life: 0.35, thickness: 0.22 });
+}
+
+/** Projectile impact: toon "pow" + flavour bits (cheese & pepperoni / whipped cream / bone dust). */
+export function projectileImpact(fx: Effects, kind: string, x: number, y: number, z: number): void {
+  if (kind === 'pie') {
+    creamSplat(fx, x, y, z);
+    return;
+  }
+  const hot = kind === 'pizza';
+  fx.glow.emit({ x, y, z, color: hot ? '#ffb347' : '#fff1d0', sprite: SPRITE.BURST, size: 3.4, life: 0.3, curve: 'flash', grow: 1.6, rot: Math.random() * 6 });
+  for (let i = 0; i < fx.n(16); i++) fx.glow.emit({ x, y, z, spread: 8, vy: 4, color: i % 2 ? '#ffd23f' : '#ffffff', size: 0.3, life: 0.45, gravity: 12, drag: 1.5, stretch: 1 });
+  for (let i = 0; i < fx.n(6); i++) fx.puff(x, y, z, hot ? '#ffd9a0' : '#e8dcc4', 1.0, { spread: 3, vy: 1.5, life: 0.7 });
+  if (hot) {
+    for (let i = 0; i < fx.n(10); i++) {
+      const pep = i % 3 === 0;
+      fx.smoke.emit({ x, y, z, spread: 6, vy: 5, color: pep ? '#c8312a' : '#ffd84a', sprite: pep ? SPRITE.BALL : SPRITE.BLOB, size: pep ? 0.32 : 0.28, life: 0.9, gravity: 14, spin: 6, floor: y - 1.5 });
+    }
+  }
+  fx.rings.spawn({ x, y, z, color: hot ? '#ffb347' : '#ffffff', size: 3.2, life: 0.35, thickness: 0.2, normal: new THREE.Vector3(0, 1, 0) });
+}
+
+/** Grandma's pie: big whipped-cream splat with dripping blobs. */
+export function creamSplat(fx: Effects, x: number, y: number, z: number): void {
+  fx.smoke.emit({ x, y, z, color: '#ffffff', sprite: SPRITE.BLOB, size: 3.0, life: 0.5, curve: 'shrink', grow: 1.3 });
+  for (let i = 0; i < fx.n(22); i++) fx.smoke.emit({ x, y, z, spread: 6, vy: 4, color: i % 5 === 0 ? '#e9b46a' : '#fffaf5', sprite: SPRITE.BLOB, size: 0.4 + Math.random() * 0.3, life: 1.1, gravity: 13, spin: 3, floor: y - 1.4 });
+  for (let i = 0; i < fx.n(5); i++) fx.glow.emit({ x, y, z, spread: 4, vy: 2, color: '#ff9ad5', sprite: SPRITE.STAR, size: 0.5, life: 0.5, spin: 6, curve: 'shrink' });
+  fx.dustRings.spawn({ x, y: y - 0.4, z, color: '#ffffff', size: 3.0, life: 0.5, thickness: 0.4, style: 1, alpha: 0.9 });
+}
 
 /** Item boxes, projectiles, dropped hazards and moving track hazards. */
 export class ItemsView {
@@ -61,7 +104,7 @@ export class ItemsView {
       const hidden = b.respawn > 0;
       const wasVisible = g.visible;
       g.visible = !hidden || b.respawn < 0.3;
-      if (hidden && wasVisible && fx) fx.burst(b.pos.x, b.pos.y, b.pos.z, ['#ff5a5a', '#ffd93a', '#4ad9ff', '#7cff6a', '#e56cff'], 26, 7);
+      if (hidden && wasVisible && fx) shatterBox(fx, g.position.x, g.position.y, g.position.z);
       const scale = hidden ? Math.max(0.01, 1 - b.respawn / 0.3) : 1;
       g.scale.setScalar(scale);
       g.rotation.y = time * 1.6 + i;
@@ -95,13 +138,11 @@ export class ItemsView {
       m.position.set(p.prevPos.x + (p.pos.x - p.prevPos.x) * alpha, p.prevPos.y + (p.pos.y - p.prevPos.y) * alpha, p.prevPos.z + (p.pos.z - p.prevPos.z) * alpha);
       m.rotation.y = p.kind === 'bone' ? p.yaw : time * 8;
       if (p.kind === 'bone') m.children[0].rotation.x = time * 14;
-      if (fx && Math.random() < 0.6) {
-        fx.glow.emit({ x: m.position.x, y: m.position.y, z: m.position.z, spread: 0.5, color: p.kind === 'pie' ? '#ff9ad5' : p.kind === 'pizza' ? '#ffb347' : '#ffffff', size: 0.45, life: 0.4, drag: 2 });
-      }
+      if (fx) this.projectileTrail(fx, p, m, time);
     }
     for (const [id, m] of this.projMeshes) {
       if (!seenP.has(id)) {
-        if (fx) fx.burst(m.position.x, m.position.y, m.position.z, ['#ffcf4a', '#ff6b3d', '#ffffff'], 24, 8);
+        if (fx) projectileImpact(fx, m.userData.kind as string, m.position.x, m.position.y, m.position.z);
         disposeObject(m);
         this.projMeshes.delete(id);
       }
@@ -113,8 +154,15 @@ export class ItemsView {
       let m = this.hazardMeshes.get(h.id);
       if (!m) {
         m = buildHazard(h);
+        m.userData.kind = h.kind;
         this.hazardMeshes.set(h.id, m);
         this.group.add(m);
+        if (fx) hazardSpawn(fx, h);
+      }
+      if (fx && h.kind === 'pothole' && h.age < 0.5 && Math.random() < 0.5) {
+        // asphalt still crumbling in
+        const a = Math.random() * Math.PI * 2;
+        fx.smoke.emit({ x: h.pos.x + Math.cos(a) * 1.8, y: h.pos.y + 0.3, z: h.pos.z + Math.sin(a) * 1.8, vy: 2.5, spread: 1.2, color: '#4a4440', sprite: SPRITE.SHARD, size: 0.3, life: 0.6, gravity: 12, spin: 8, floor: h.pos.y + 0.05 });
       }
       m.position.set(h.pos.x, h.pos.y, h.pos.z);
       if (h.kind === 'tennisBall') m.rotation.x = time * 6;
@@ -126,6 +174,10 @@ export class ItemsView {
     }
     for (const [id, m] of this.hazardMeshes) {
       if (!seenH.has(id)) {
+        if (fx) {
+          for (let i = 0; i < fx.n(5); i++) fx.puff(m.position.x, m.position.y + 0.4, m.position.z, m.userData.kind === 'banana' ? '#fff2a0' : '#d9d2c8', 0.8, { spread: 2, vy: 1.5, life: 0.5 });
+          if (m.userData.kind === 'banana') for (let i = 0; i < fx.n(8); i++) fx.smoke.emit({ x: m.position.x, y: m.position.y + 0.3, z: m.position.z, spread: 4, vy: 4, color: '#ffd83a', sprite: SPRITE.BLOB, size: 0.25, life: 0.6, gravity: 14, floor: m.position.y });
+        }
         disposeObject(m);
         this.hazardMeshes.delete(id);
       }
@@ -151,10 +203,50 @@ export class ItemsView {
     void dt;
   }
 
+  private projectileTrail(fx: Effects, p: Projectile, m: THREE.Object3D, time: number): void {
+    const x = m.position.x, y = m.position.y, z = m.position.z;
+    const glow = m.userData.glow as THREE.Sprite | undefined;
+    if (glow) {
+      glow.material.rotation = time * 6;
+      glow.scale.setScalar(2.6 + Math.sin(time * 18) * 0.3);
+    }
+    const dx = p.pos.x - p.prevPos.x, dz = p.pos.z - p.prevPos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const bx = -dx / d, bz = -dz / d;
+    if (p.kind === 'pizza') {
+      // stretchy cheese strings sagging behind + hot sparks
+      if (Math.random() < 0.8) fx.smoke.emit({ x: x + bx * 0.6, y: y + 0.1, z: z + bz * 0.6, vx: bx * 2, vz: bz * 2, vy: 0.5, spread: 0.4, color: '#ffe066', color2: '#ffc93a', sprite: SPRITE.SOFT, size: 0.22, life: 0.5, gravity: 7, drag: 1, stretch: 2.5 });
+      if (Math.random() < 0.5) fx.glow.emit({ x, y: y + 0.2, z, spread: 0.8, vy: 0.5, color: '#ffb347', sprite: SPRITE.SPARKLE, size: 0.4, life: 0.35, spin: 6, curve: 'shrink' });
+    } else if (p.kind === 'pie') {
+      if (Math.random() < 0.7) fx.glow.emit({ x, y: y + 0.5, z, spread: 0.8, color: '#ff9ad5', sprite: Math.random() < 0.5 ? SPRITE.STAR : SPRITE.SPARKLE, size: 0.42, life: 0.45, spin: 5, curve: 'shrink' });
+      if (Math.random() < 0.3) fx.smoke.emit({ x, y: y + 0.3, z, spread: 0.6, vy: 1, color: '#ffffff', sprite: SPRITE.BLOB, size: 0.2, life: 0.5, gravity: 9 });
+    } else {
+      // giant bone: rolling dust clouds kicked up from the road
+      if (Math.random() < 0.7) fx.smoke.emit({ x: x + bx * 1.2 + (Math.random() - 0.5) * 2, y: y - 0.3, z: z + bz * 1.2, vx: bx * 2, vz: bz * 2, vy: 1.2, spread: 0.6, color: '#d8c6a4', sprite: SPRITE.DUST, size: 1.0, life: 0.7, grow: 2, drag: 2, curve: 'shrink', spin: 1 });
+      if (Math.random() < 0.3) fx.smoke.emit({ x, y: y - 0.3, z, vx: bx * 3, vz: bz * 3, vy: 3, spread: 1.5, color: '#8a7a60', sprite: SPRITE.SHARD, size: 0.18, life: 0.5, gravity: 14, spin: 10, floor: y - 0.5 });
+    }
+  }
+
   dispose(): void {
     this.group.removeFromParent();
     for (const m of [...this.projMeshes.values(), ...this.hazardMeshes.values(), ...this.movingMeshes.values()]) disposeObject(m);
     this.disposables.forEach((d) => d.dispose());
+  }
+}
+
+/** New dropped hazard: banana plop, tennis-ball bounce, pothole crumbling asphalt. */
+function hazardSpawn(fx: Effects, h: DroppedHazard): void {
+  const { x, y, z } = h.pos;
+  if (h.kind === 'pothole') {
+    for (let i = 0; i < fx.n(18); i++) fx.smoke.emit({ x, y: y + 0.3, z, spread: 5, vy: 5, color: i % 3 ? '#3a3632' : '#6a625a', sprite: SPRITE.SHARD, size: 0.35, life: 0.9, gravity: 14, spin: 10, floor: y + 0.05 });
+    for (let i = 0; i < fx.n(8); i++) fx.puff(x, y + 0.4, z, '#a89c8c', 1.4, { spread: 3, vy: 1.6, life: 1.0, grow: 2.2 });
+    fx.dustRings.spawn({ x, y: y + 0.15, z, color: '#b8ab98', size: 4.2, life: 0.6, thickness: 0.35, style: 1, alpha: 0.8 });
+  } else if (h.kind === 'banana') {
+    for (let i = 0; i < fx.n(4); i++) fx.puff(x, y + 0.3, z, '#f4ecd0', 0.6, { spread: 1.5, vy: 1, life: 0.5 });
+    fx.glow.emit({ x, y: y + 0.8, z, color: '#ffe14a', sprite: SPRITE.STAR, size: 0.6, life: 0.4, curve: 'shrink', spin: 4 });
+  } else {
+    for (let i = 0; i < fx.n(8); i++) fx.smoke.emit({ x, y: y + 0.5, z, spread: 4, vy: 4, color: i % 2 ? '#d7f23a' : '#ffffff', sprite: SPRITE.CONFETTI, size: 0.26, life: 1.0, gravity: 8, drag: 1.5, flutter: true });
+    fx.puff(x, y + 0.3, z, '#efe6cf', 0.8, { spread: 1, vy: 1 });
   }
 }
 
@@ -165,8 +257,15 @@ function disposeObject(o: THREE.Object3D): void {
       c.geometry.dispose();
       const mats = Array.isArray(c.material) ? c.material : [c.material];
       mats.forEach((m) => m.dispose());
+    } else if (c instanceof THREE.Sprite) {
+      c.material.dispose();
     }
   });
+}
+
+let sharedHalo: THREE.Texture | null = null;
+function haloTex(): THREE.Texture {
+  return (sharedHalo ??= haloTexture());
 }
 
 function haloTexture(): THREE.Texture {
@@ -208,6 +307,16 @@ const std = (color: string, extra: THREE.MeshStandardMaterialParameters = {}) =>
 
 function buildProjectile(p: Projectile): THREE.Object3D {
   const g = new THREE.Group();
+  g.userData.kind = p.kind;
+  if (p.kind !== 'bone') {
+    // spinning additive glow behind the projectile (catches the bloom)
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex(), color: new THREE.Color(p.kind === 'pizza' ? '#ffb347' : '#ff9ad5').multiplyScalar(1.6), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.85 }));
+    glow.scale.setScalar(2.6);
+    glow.position.y = 0.3;
+    glow.renderOrder = 6;
+    g.add(glow);
+    g.userData.glow = glow;
+  }
   if (p.kind === 'pizza') {
     const shape = new THREE.Shape();
     shape.moveTo(0, 0);

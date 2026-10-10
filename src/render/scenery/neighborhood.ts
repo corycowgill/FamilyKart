@@ -6,8 +6,9 @@ import { getField } from './field';
 import { flagTexture } from './textures';
 import {
   aonCenter, ballpark, beefStand, bluesClub, bungalow, pizzeria, popcornShop, windGusts, buildChicagoFlag, CTA, frameHouse, twoFlat, cornerTavern, dibsGeo, elevatedL, faceRoad, findSpot, glassSpireTower, hancockCenter, hotDogStand, Kit, marinaCity, willisTower,
-  runningDogs,
+  runningDogs, houseBodyMat, streetLife, edgeGrass, dressBlock,
 } from './chicagoLandmarks';
+import { awningParts, hydrant as hydrantGeo } from './props';
 
 type P = Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>;
 
@@ -119,7 +120,11 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
     part(new THREE.BoxGeometry(14, 9, 12), '#c96f4a', M.t(0, 4.5, 0));
     part(new THREE.BoxGeometry(14.4, 0.6, 12.4), '#e9dcc4', M.t(0, 9.2, 0));
     part(new THREE.BoxGeometry(12, 3, 0.3), '#cfe8ff', M.t(0, 2.2, 6.05));
-    for (let i = 0; i < 6; i++) part(new THREE.BoxGeometry(2, 0.2, 2.4), i % 2 ? '#ffffff' : '#2fa84f', M.trs(-5 + i * 2, 4.2, 7.0, 0.35, 0, 0));
+    if (lo) for (let i = 0; i < 6; i++) part(new THREE.BoxGeometry(2, 0.2, 2.4), i % 2 ? '#ffffff' : '#2fa84f', M.trs(-5 + i * 2, 4.2, 7.0, 0.35, 0, 0));
+    else {
+      awningParts(lmParts, 12.4, 2.0, '#2fa84f', '#ffffff', m.clone().multiply(M.t(0, 4.7, 6.1)), quality);
+      dressBlock(kit, m, 14, 9, 12, { cornice: '#e9dcc4', roof: 'hvac', plinth: '#8a7a68' });
+    }
     placer.reserve(c.x, c.z, 12);
   }
   // water tower
@@ -199,7 +204,8 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
 
   /* ------------------------------------------------ houses along the streets */
   const types = [twoFlat(), bungalow(), frameHouse()];
-  const bodyB = types.map((t) => new Batch(bag.add(t.body), vcBody, { name: 'houseBody' }));
+  const bodyMats = lo ? [vcBody, vcBody, vcBody] : [houseBodyMat(bag), houseBodyMat(bag), houseBodyMat(bag, 'siding')];
+  const bodyB = types.map((t, i) => new Batch(bag.add(t.body), bodyMats[i], { name: 'houseBody' }));
   const detB = types.map((t) => new Batch(bag.add(t.detail), vc, { name: 'houseDetail' }));
   // far houses: same silhouette, fewer window boxes
   const farTF = twoFlat(true);
@@ -280,7 +286,8 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
       bt.build(group);
     };
     // fire hydrants
-    small(mergeColored([
+    if (!lo) small(hydrantGeo(), 110, 0.6);
+    else small(mergeColored([
       [new THREE.CylinderGeometry(0.28, 0.32, 0.9, 8), '#ffcc00', M.t(0, 0.45, 0)],
       [new THREE.SphereGeometry(0.3, 8, 6), '#ffcc00', M.t(0, 0.95, 0)],
       [new THREE.CylinderGeometry(0.1, 0.1, 0.7, 6).rotateZ(Math.PI / 2), '#e23d3d', M.t(0, 0.6, 0)],
@@ -298,6 +305,9 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
       [new THREE.BoxGeometry(0.45, 0.45, 0.7), '#2f4f8f', M.t(0, 1.2, 0)],
     ]), 85, 9);
   }
+
+  streetLife(kit, placer, { hydrants: false, sparse: 1.3, paths: [0] });
+  edgeGrass(kit, placer, { base: '#3f8a34', tip: '#a3d86c', flowers: ['#ffffff', '#ffe066', '#ff8fc0'], band: [1.2, 3.5] });
 
   /* ------------------------------------------------ hedges / bushes + flower beds in front yards */
   {

@@ -21,6 +21,8 @@ export interface Settings {
   keys?: Record<string, string[]>;
   /** true once the player picked a graphics quality themselves */
   qualityChosen?: boolean;
+  /** opt-in "Ultra graphics (powerful PCs)" on top of high quality (default off) */
+  ultra?: boolean;
   /** on-screen touch control preferences */
   touch?: TouchOptions;
   /** lighting for races (track select picker); missing in older saves = day */

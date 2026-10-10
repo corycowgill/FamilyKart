@@ -8,8 +8,11 @@ export interface Viewport {
   camera: THREE.PerspectiveCamera;
   /** normalized rect: x, y (from bottom), w, h */
   rect: [number, number, number, number];
-  /** optional per-view effect drivers (speed lines): speed relative to max speed, boost 0..1 */
-  fx?: { speed: number; boost: number };
+  /**
+   * optional per-view effect drivers: speed relative to max speed (speed lines / vignette), boost 0..1
+   * (radial blur, chromatic aberration), hit flash 0..1 + colour, world position of the exhaust heat shimmer
+   */
+  fx?: { speed: number; boost: number; hit?: number; hitColor?: THREE.Color; heatWorld?: THREE.Vector3 };
 }
 
 /** Sky/lighting description used to build a matching reflection environment. */
@@ -23,9 +26,14 @@ export interface EnvLighting {
 
 /** What each quality tier turns on. Read by Environment / TrackView / Particles too. */
 export const QUALITY_TIERS: Record<Quality, { dprMax: number; post: PostConfig | null }> = {
-  high: { dprMax: 2, post: { bloomLevels: 5, bloomDiv: 2, samples: 4, speedLines: true } },
+  high: { dprMax: 2, post: { bloomLevels: 5, bloomDiv: 2, samples: 4, speedLines: true, ao: 1, screenFx: true } },
   medium: { dprMax: 1.25, post: { bloomLevels: 3, bloomDiv: 4, samples: 4, speedLines: true } },
   low: { dprMax: 0.85, post: null },
+};
+
+/** Opt-in "Ultra" on top of high: wider/denser AO, higher pixel ratio, SMAA when MSAA is missing (+ 4096 shadows, more particles elsewhere). */
+export const ULTRA_TIER: { dprMax: number; post: PostConfig } = {
+  dprMax: 2.5, post: { bloomLevels: 6, bloomDiv: 2, samples: 4, speedLines: true, ao: 2, screenFx: true, smaa: true },
 };
 
 /** Owns the WebGL renderer, canvas sizing, quality settings, post-processing and (split-screen) viewport rendering. */
@@ -33,6 +41,8 @@ export class Renderer {
   readonly gl: THREE.WebGLRenderer;
   readonly canvas: HTMLCanvasElement;
   quality: Quality = 'high';
+  /** Ultra graphics (opt-in, desktop): only takes effect on top of 'high'. */
+  private ultraOn = false;
   width = 1;
   height = 1;
   private onResizeCbs: Array<() => void> = [];
@@ -112,9 +122,21 @@ export class Renderer {
     this.onResizeCbs.push(cb);
   }
 
+  /** true when Ultra rendering is active (requested and quality is high) */
+  get ultra(): boolean {
+    return this.ultraOn && this.quality === 'high';
+  }
+
+  /** Toggle Ultra graphics (rebuilds the post chain; new races pick up shadows / particle budgets). */
+  setUltra(on: boolean): void {
+    if (on === this.ultraOn) return;
+    this.ultraOn = on;
+    this.setQuality(this.quality);
+  }
+
   setQuality(q: Quality): void {
     this.quality = q;
-    const tier = QUALITY_TIERS[q];
+    const tier = this.ultra ? ULTRA_TIER : QUALITY_TIERS[q];
     const dpr = Math.min(window.devicePixelRatio || 1, tier.dprMax);
     this.gl.setPixelRatio(dpr);
     this.gl.shadowMap.enabled = q !== 'low';
@@ -165,7 +187,10 @@ export class Renderer {
       });
       gl.shadowMap.autoUpdate = prevShadowAuto;
       const flare = scene.userData.sunFlare as { dir: THREE.Vector3 } | undefined;
-      post.finish(scene, viewports.map((v) => ({ rect: v.rect, speed: v.fx?.speed ?? 0, boost: v.fx?.boost ?? 0, sun: flare ? sunScreen(v.camera, flare.dir) : undefined })), this.width, this.height);
+      post.finish(scene, viewports.map((v) => ({
+        rect: v.rect, speed: v.fx?.speed ?? 0, boost: v.fx?.boost ?? 0, sun: flare ? sunScreen(v.camera, flare.dir) : undefined,
+        hit: v.fx?.hit, hitColor: v.fx?.hitColor, heat: v.fx?.heatWorld ? heatScreen(v.camera, v.fx.heatWorld) : undefined, camera: v.camera,
+      })), this.width, this.height);
       return;
     }
     gl.setRenderTarget(null);
@@ -197,6 +222,14 @@ export class Renderer {
       cam.updateProjectionMatrix();
     }
   }
+}
+
+const tmpHeat = new THREE.Vector3();
+/** Exhaust position in viewport uv + strength (0 when behind the camera / off screen). */
+function heatScreen(cam: THREE.PerspectiveCamera, p: THREE.Vector3): [number, number, number] {
+  tmpHeat.copy(p).project(cam);
+  if (tmpHeat.z > 1 || Math.abs(tmpHeat.x) > 1.2 || Math.abs(tmpHeat.y) > 1.2) return [0, 0, 0];
+  return [tmpHeat.x * 0.5 + 0.5, tmpHeat.y * 0.5 + 0.5, 1];
 }
 
 const tmpSun = new THREE.Vector3();

@@ -60,8 +60,81 @@ export interface RoadTexOpts {
 }
 
 /** Road texture: u = across (0..1 left->right), v = along. One tile = roadTileLen meters. */
-export function roadTexture(o: RoadTexOpts, seed = 7): THREE.CanvasTexture {
-  return canvasTexture(256, 512, (g, w, h, rng) => {
+export function roadTexture(o: RoadTexOpts, seed = 7, scale = 1): THREE.CanvasTexture {
+  return canvasTexture(256 * scale, 512 * scale, (g, W, H, rng) => {
+    // drawn in a 256 x 512 design space; `scale` > 1 adds fine aggregate, cracks and paint wear
+    g.scale(scale, scale);
+    const w = W / scale, h = H / scale;
+    roadDesign(g, w, h, rng, o);
+    if (scale > 1) roadFine(g, w, h, rng, o, scale);
+  }, { seed });
+}
+
+/** Extra high-resolution detail on top of the road design (device pixels). */
+function roadFine(g: CanvasRenderingContext2D, w: number, h: number, rng: Rng, o: RoadTexOpts, scale: number): void {
+  const style = o.style ?? 'asphalt';
+  if (style === 'placemat') return;
+  g.save();
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  const W = w * scale, H = h * scale;
+  // fine aggregate: light & dark grains
+  const grains = style === 'dirt' ? ['#5e3d1f', '#e2c290', '#8d6a43', '#f1dcb4'] : style === 'snow' ? ['#ffffff', '#9fb0c6', '#e9f0f8'] : ['#2f3135', '#8d9096', '#a19a8c', '#44464b'];
+  for (let i = 0; i < (W * H) / 9; i++) {
+    g.globalAlpha = rng.range(0.12, 0.4);
+    g.fillStyle = grains[rng.int(grains.length)];
+    const sz = rng.range(0.8, 1.8);
+    g.fillRect(rng.next() * W, rng.next() * H, sz, sz);
+  }
+  g.globalAlpha = 1;
+  if (style === 'dirt') {
+    // pebbles
+    for (let i = 0; i < 420 * scale; i++) {
+      const x = rng.next() * W, y = rng.next() * H, r = rng.range(0.6, 1.8) * scale * 0.5;
+      g.fillStyle = rng.pick(['#a8916f', '#b89c78', '#8f7a5e', '#c9b28c']);
+      g.beginPath();
+      g.ellipse(x, y, r, r * rng.range(0.6, 0.9), rng.next() * 3, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = 'rgba(255,240,210,0.25)';
+      g.beginPath();
+      g.arc(x - r * 0.3, y - r * 0.3, r * 0.35, 0, Math.PI * 2);
+      g.fill();
+    }
+  } else if (style === 'asphalt') {
+    // sealed crack lines (tar snakes, soft & wide) and a few hairline cracks
+    for (let i = 0; i < 6; i++) {
+      let x = rng.range(0.1, 0.9) * W, y = rng.next() * H;
+      const tar = i < 3;
+      g.strokeStyle = tar ? 'rgba(28,29,33,0.32)' : 'rgba(22,22,24,0.35)';
+      g.lineWidth = (tar ? 3.2 : 0.8) * scale * 0.5;
+      g.lineJoin = 'round';
+      g.lineCap = 'round';
+      g.beginPath();
+      g.moveTo(x, y);
+      let dir = rng.next() * Math.PI * 2;
+      const steps = tar ? 22 : 10;
+      for (let k = 0; k < steps; k++) {
+        dir += rng.range(-0.35, 0.35);
+        const st = rng.range(2, 5) * scale;
+        x += Math.cos(dir) * st;
+        y += Math.sin(dir) * st;
+        g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    // paint wear: asphalt-coloured flecks chipping the markings
+    g.fillStyle = o.base;
+    for (let i = 0; i < (W * H) / 700; i++) {
+      g.globalAlpha = rng.range(0.15, 0.45);
+      const sz = rng.range(0.8, 2) * scale * 0.35;
+      g.fillRect(rng.next() * W, rng.next() * H, sz, sz * rng.range(0.6, 1.6));
+    }
+    g.globalAlpha = 1;
+  }
+  g.restore();
+}
+
+function roadDesign(g: CanvasRenderingContext2D, w: number, h: number, rng: Rng, o: RoadTexOpts): void {
+  {
     g.fillStyle = o.base;
     g.fillRect(0, 0, w, h);
     if (o.patches) blobs(g, w, h, rng, o.patches, 26, [10, 40], 0.18);
@@ -139,7 +212,7 @@ export function roadTexture(o: RoadTexOpts, seed = 7): THREE.CanvasTexture {
     g.fillRect(w * 0.25, 0, w * 0.12, h);
     g.fillRect(w * 0.63, 0, w * 0.12, h);
     g.globalAlpha = 1;
-  }, { seed });
+  }
 }
 
 export function stripeTexture(a: string, b: string, n = 2, horizontal = false): THREE.CanvasTexture {

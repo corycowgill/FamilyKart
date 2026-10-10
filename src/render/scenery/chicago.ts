@@ -6,11 +6,12 @@ import { addClouds, Batch, trimShadows, ctxBits, disposeGroup, flagGeometry, fla
 import { getField } from './field';
 import { canvasTexture, crowdTexture, drawChicagoFlag, flagTexture, textTexture, waterTexture, windowTexture } from './textures';
 import {
-  adlerPlanetarium, aonCenter, beam, bluesClub, sweetHomeBillboard, windGusts, buildBuckingham, buildNavyPier, artMuseum, bannerBatch, beefStand, bikeDockGeo, busShelterGeo, chicagoTheatre, cloudGate, CTA, crownFountain, elevatedL, faceRoad,
+  adlerPlanetarium, aonCenter, beam, bluesClub, sweetHomeBillboard, windGusts, buildBuckingham, buildNavyPier, artMuseum, bannerBatch, beefStand, chicagoTheatre, cloudGate, CTA, crownFountain, elevatedL, faceRoad,
   findSpot, glassSpireTower, hancockCenter, hotDogStand, Kit, lifeguardGeo, marinaCity, merchMart, museumHall, picasso, pizzeria, popcornShop, pritzkerPavilion,
   rooftopTankGeo, sheddAquarium, tribuneTower, waterTowerCastle, wavyTower, willisTower, wrigleyBuilding,
-  kites, runningDogs,
+  kites, runningDogs, streetLife, tireWalls, edgeGrass, dressBlock,
 } from './chicagoLandmarks';
+import { flowerBed, grassTuft, canopy } from './props';
 
 /**
  * Chicago Grand Prix: Lake Michigan to the east with Navy Pier, the Ferris wheel and sailboats,
@@ -227,6 +228,7 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     const batch = r < 0.36 ? bA : r < 0.74 ? bB : bC;
     const tint = rng.pick(palette);
     batch.add(x, 0, z, 0, w, h, d, tint);
+    if (!lo) dressBlock(kit, M.t(x, 0, z), w, h, d, { cornice: rng.pick(['#d9d2c3', '#c9ced6', '#e8e2d4', '#9aa3ad']), ledge: h < 90 && rng.chance(0.5) ? 24 : undefined, roof: h < 70 ? 'mixed' : 'none', dentils: false, seed: Math.round(x * 3 + z) });
     const k = rng.next();
     if (h > 105 && k < 0.4) crowns.add(x, h, z, 0, w * 0.98, Math.min(w, d) * 0.9, d * 0.98, rng.pick(['#2f7f6f', '#c9a24a', '#e8e8e8', '#9a2b2b', '#2b3f6b']));
     else if (h > 70 && k < 0.75) {
@@ -271,7 +273,18 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     const parts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [];
     for (const side of [-1, 1]) {
       // lattice towers
-      parts.push([new THREE.BoxGeometry(2.4, 18, 2.4), red, M.t(side * wd, 9, 0)]);
+      if (lo) parts.push([new THREE.BoxGeometry(2.4, 18, 2.4), red, M.t(side * wd, 9, 0)]);
+      else {
+        // open lattice tower: four chords, cross bracing on every face, bolted base plates
+        for (const [cx, cz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) parts.push([new THREE.BoxGeometry(0.34, 18, 0.34), red, M.t(side * wd + cx * 1.05, 9, cz * 1.05)]);
+        for (let y = 0.6; y < 17.5; y += 1.6) {
+          for (const f of [-1, 1]) {
+            beam(parts, [side * wd - 1.05, y, f * 1.05], [side * wd + 1.05, y + 1.6, f * 1.05], 0.12, '#b81f27');
+            beam(parts, [side * wd + f * 1.05, y, -1.05], [side * wd + f * 1.05, y + 1.6, 1.05], 0.12, '#b81f27');
+          }
+        }
+        parts.push([new THREE.BoxGeometry(1.4, 18, 1.4), '#9e1b22', M.t(side * wd, 9, 0)]);
+      }
       parts.push([new THREE.BoxGeometry(3.4, 1.2, 3.4), '#9e1b22', M.t(side * wd, 18.4, 0)]);
       parts.push([new THREE.ConeGeometry(2.0, 3.2, 4).rotateY(Math.PI / 4), red, M.t(side * wd, 20.6, 0)]);
       parts.push([new THREE.BoxGeometry(3.2, 1.2, 3.2), '#bfbfbf', M.t(side * wd, 0.6, 0)]);
@@ -468,7 +481,17 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
         const leaf = at(bx, 0.2, side * (c.halfWidth + 1), 0, side * 1.0, 0);
         kit.gloss.push([new THREE.BoxGeometry(10, 0.7, 9.5), '#6b6f76', leaf.clone().multiply(M.t(0, 0, -side * 4.75))]);
         for (const tx of [-4.6, 4.6]) {
-          kit.gloss.push([new THREE.BoxGeometry(0.6, 2.2, 9.5), '#b3202a', leaf.clone().multiply(M.t(tx, 1.1, -side * 4.75))]);
+          if (lo) kit.gloss.push([new THREE.BoxGeometry(0.6, 2.2, 9.5), '#b3202a', leaf.clone().multiply(M.t(tx, 1.1, -side * 4.75))]);
+          else {
+            // riveted Pratt truss: chords, verticals, diagonals and gusset plates
+            for (const cy of [0.25, 2.3]) kit.gloss.push([new THREE.BoxGeometry(0.5, 0.35, 9.6), '#b3202a', leaf.clone().multiply(M.t(tx, cy, -side * 4.75))]);
+            for (let k = 0; k <= 6; k++) {
+              const z = -side * (k * 1.58 + 0.05);
+              kit.gloss.push([new THREE.BoxGeometry(0.4, 2.1, 0.3), '#b3202a', leaf.clone().multiply(M.t(tx, 1.27, z))]);
+              kit.near('gloss', new THREE.BoxGeometry(0.62, 0.7, 0.7), '#8f1820', leaf.clone().multiply(M.t(tx, 2.2, z)));
+              if (hi) for (const ry of [2.05, 2.35]) for (const rz of [-0.18, 0.18]) kit.near('gloss', new THREE.CylinderGeometry(0.05, 0.05, 0.7, 5).rotateZ(Math.PI / 2), '#d6d6d6', leaf.clone().multiply(M.t(tx, ry, z + rz)));
+            }
+          }
           for (let k = 0; k < 4; k++) beam(kit.gloss, [tx, 0.2, -side * (k * 2.3 + 0.2)], [tx, 2.1, -side * (k * 2.3 + 1.3)], 0.25, '#b3202a', leaf);
         }
         // tender house
@@ -568,6 +591,8 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     }
     lamps.build(group);
   }
+  tireWalls(kit, placer);
+  streetLife(kit, placer, { sparse: 1.1 });
 
   /* ------------------------------------------------ street food, bus shelters, bikes + fans */
   {
@@ -585,11 +610,8 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
         }
       }
     });
-    if (hi) {
-      const shelters = kit.batch(busShelterGeo(), vc, { name: 'busShelters' });
-      for (const s of placer.along(0, 210, 3.5, 3)) shelters.add(s.x, s.y, s.z, s.yaw);
-      const bikes = kit.batch(bikeDockGeo(), vc, { name: 'bikes', cast: false });
-      for (const s of placer.along(0, 260, 3.5, 3.6)) bikes.add(s.x, s.y, s.z, s.yaw);
+    if (lo) {
+      // (finer street furniture comes from streetLife below on medium / high)
     }
     if (!lo) {
       // fans around the Bean and at the Crown Fountain pool
@@ -612,10 +634,10 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     const treeA = new Batch(bag.add(PROPS.roundTree('#3fa34d', '#5cc25e')), vc, { name: 'treesA' });
     const treeB = new Batch(bag.add(PROPS.roundTree('#2f8f45', '#7ccf5a', '#6b4425')), vc, { name: 'treesB' });
     const bushes = new Batch(bag.add(PROPS.bush('#3f9a3a', '#6cc04f')), vc, { name: 'bushes', cast: false });
-    const flowers = new Batch(bag.add(mergeColored([
+    const flowers = new Batch(bag.add(lo ? mergeColored([
       [new THREE.CylinderGeometry(2.2, 2.4, 0.5, 12), '#7a5230', M.t(0, 0.25, 0)],
       [new THREE.IcosahedronGeometry(1.9, 1), '#ff5fa2', M.trs(0, 0.7, 0, 0, 0, 0, 1, 0.35, 1)],
-    ])), vc, { cast: false });
+    ]) : flowerBed(quality, 2.3, 21)), lo ? vc : kit.tintMat, { cast: false });
     const n = density;
     const park = { minX: b.minX - 20, maxX: b.maxX + 10, minZ: b.minZ - 10, maxZ: b.maxZ + 10 };
     for (const s of placer.scatter(Math.round(260 * n), park, 3.5, 3)) (rng.chance(0.5) ? treeA : treeB).add(s.x, s.y, s.z, s.yaw, rng.range(0.9, 1.4));
@@ -636,6 +658,7 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     bushes.build(group);
     if (!lo) flowers.build(group);
     if (hi) benches.build(group);
+    edgeGrass(kit, placer, { base: '#3f8a34', tip: '#9fd66a', flowers: ['#ffffff', '#ffd23f', '#ff8fc0', '#b48cff'] });
   }
 
   /* ------------------------------------------------ beach with umbrellas north of the pier */
@@ -660,6 +683,17 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
     }
     umbrellas.build(group);
     if (!lo) towels.build(group);
+    if (!lo) {
+      // soft dunes with marram grass along the back of the beach
+      const duneGeo = canopy([{ x: 0, y: -0.6, z: 0, r: 3.2, sy: 0.35 }, { x: 2.4, y: -0.7, z: 0.6, r: 2.4, sy: 0.32 }, { x: -2.2, y: -0.75, z: -0.5, r: 2.2, sy: 0.3 }], '#d9bf86', '#fbe9bc', 1, 77, { center: new THREE.Vector3(0, -3, 0), bumpy: 0.2, soft: 0.8 });
+      const dunes = kit.batch(duneGeo, kit.solidMat, { cast: false, name: 'dunes' });
+      const marram = kit.batch(grassTuft('#8a9a4a', '#d8d79a', quality, { h: 0.9, blades: hi ? 9 : 6, seed: 3, spread: 0.3 }), kit.solidMat, { cast: false, name: 'marram' });
+      for (let z = bz0 + 4; z < bz1 - 4; z += rng.range(10, 18)) {
+        const x = shoreX + rng.range(0.5, 2.2);
+        dunes.add(x, -0.75, z, rng.next() * 6, rng.range(0.8, 1.3), rng.range(0.8, 1.4), rng.range(0.8, 1.2));
+        for (let m = 0; m < (hi ? 9 : 5); m++) marram.add(x + rng.range(-1.5, 3), -0.75 + rng.range(0.1, 0.4), z + rng.range(-3, 3), rng.next() * 6, rng.range(0.8, 1.3));
+      }
+    }
     if (hi) {
       const guards = kit.batch(lifeguardGeo(), vc, { name: 'lifeguards' });
       for (let z = bz0 + 30; z < bz1 - 20; z += 95) guards.add(shoreX + 13, -0.75, z, -Math.PI / 2);

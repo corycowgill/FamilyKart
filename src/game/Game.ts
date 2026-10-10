@@ -114,6 +114,7 @@ export class Game {
     // phones and tablets start on medium graphics unless the player picked a quality themselves
     if (isTouchDevice() && !s.qualityChosen && s.quality === 'high' && !window.matchMedia?.('(any-pointer: fine)').matches) this.save.updateSettings({ quality: 'medium' });
     this.renderer.setQuality(this.save.settings.quality);
+    this.renderer.setUltra(!!this.save.settings.ultra);
     audio.setVolumes(s.master, s.music, s.sfx);
     setAnnouncerEnabled(s.announcer ?? true);
     if (s.keys) this.input.setKeyMap(0, { ...DEFAULT_KEYS_P1, ...(s.keys as Partial<KeyMap>) } as KeyMap);
@@ -201,6 +202,14 @@ export class Game {
     if (!this.session || this.session.paused || this.screenName !== 'race') return;
     this.slowTime = this.fps.value < 32 ? this.slowTime + 0.5 : Math.max(0, this.slowTime - 0.5);
     const q = this.renderer.quality;
+    if (this.slowTime >= 6 && this.renderer.ultra && this.fps.value > 3) {
+      // Ultra is the first thing to go when the frame rate drops
+      this.slowTime = 0;
+      this.renderer.setUltra(false);
+      this.save.updateSettings({ ultra: false });
+      console.info('[quality] low frame rate detected, turning Ultra graphics off');
+      return;
+    }
     if (this.slowTime >= 6 && q !== 'low' && this.fps.value > 3) {
       this.slowTime = 0;
       const next = q === 'high' ? 'medium' : 'low';
@@ -881,6 +890,18 @@ export class Game {
       this.save.updateSettings({ quality: quality.value as 'low' | 'medium' | 'high', qualityChosen: true });
       this.renderer.setQuality(this.save.settings.quality);
     });
+    const ultra = h('input', { type: 'checkbox', checked: !!s.ultra, 'data-testid': 'ultra' }) as HTMLInputElement;
+    ultra.addEventListener('change', () => {
+      this.save.updateSettings({ ultra: ultra.checked });
+      // Ultra builds on high quality
+      if (ultra.checked && this.save.settings.quality !== 'high') {
+        this.save.updateSettings({ quality: 'high', qualityChosen: true });
+        (quality as HTMLSelectElement).value = 'high';
+        this.renderer.setQuality('high');
+      }
+      this.renderer.setUltra(ultra.checked);
+    });
+    const ultraRow = h('div', { class: 'row' }, h('span', {}, 'Ultra graphics (powerful PCs)'), ultra);
     const check = (label: string, key: 'steeringAssist' | 'showFps' | 'announcer', after?: () => void) => {
       const c = h('input', { type: 'checkbox', checked: s[key] ?? true });
       c.addEventListener('change', () => {
@@ -923,6 +944,7 @@ export class Game {
         h('h2', {}, 'Settings'),
         slider('Master volume', 'master'), slider('Music', 'music'), slider('Sound effects', 'sfx'),
         h('div', { class: 'row' }, h('span', {}, 'Graphics quality'), quality),
+        ultraRow,
         check('Steering assist (younger racers)', 'steeringAssist'),
         check('Show FPS', 'showFps', () => this.updateFpsVisibility()),
         check('Race announcer voice', 'announcer', () => setAnnouncerEnabled(this.save.settings.announcer !== false)),

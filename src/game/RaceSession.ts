@@ -13,6 +13,7 @@ import { Environment } from '../render/Environment';
 import { ItemsView } from '../render/ItemsView';
 import { KartView } from '../render/KartView';
 import { Effects } from '../render/Particles';
+import { RaceVfx } from '../render/vfx/RaceVfx';
 import type { Renderer, Viewport } from '../render/Renderer';
 import { sceneryFor } from '../render/scenery';
 import type { SceneryHandle } from '../render/scenery/types';
@@ -53,6 +54,8 @@ export class RaceSession {
   private sceneryGroup = new THREE.Group();
   private items!: ItemsView;
   private fx!: Effects;
+  private vfx: RaceVfx | null = null;
+  private heatTmp = [new THREE.Vector3(), new THREE.Vector3()];
   private acc = 0;
   private renderTime = 0;
   paused = false;
@@ -99,7 +102,7 @@ export class RaceSession {
     // time of day is known before any scenery is built (scenery may read scene/group userData.timeOfDay)
     this.scene.userData.timeOfDay = this.timeOfDay;
     this.sceneryGroup.userData.timeOfDay = this.timeOfDay;
-    this.env = new Environment(this.scene, lighting, q, this.opts.track.theme, this.timeOfDay, this.opts.track);
+    this.env = new Environment(this.scene, lighting, q, this.opts.track.theme, this.timeOfDay, this.opts.track, this.renderer.ultra);
     const tl = this.env.tod;
     this.scene.environment = indoor ? this.renderer.envMap() : this.renderer.skyEnvMap(tl ? tl.lighting : lighting, this.env.sunDir);
     this.scene.environmentIntensity = (indoor ? 0.4 : 0.5) * (tl ? tl.envIntensity / 0.5 : 1);
@@ -119,7 +122,8 @@ export class RaceSession {
     }
     this.items = new ItemsView(this.sim);
     this.scene.add(this.items.group);
-    this.fx = new Effects(this.scene, q, this.opts.track.theme);
+    this.fx = new Effects(this.scene, q, this.opts.track.theme, this.renderer.ultra);
+    this.vfx = new RaceVfx(this.scene, this.fx, this.kartViews, this.sim, this.track, this.players);
     if (tl) {
       this.fx.setNight(tl.night);
       const spotKart = this.players[0] ? this.kartViews[this.players[0].id] : null;
@@ -243,7 +247,8 @@ export class RaceSession {
       });
     }
     const isLocal = (id: number) => this.sim.karts[id]?.isHuman;
-    const kpos = (id: number) => this.kartViews[id]?.interpPos;
+    // event -> VFX hookups (particles, rings, arcs, gust sweep, screen hit flash)
+    this.vfx?.onEvent(e);
     switch (e.type) {
       case 'countdown':
         audio.play('countdown');
@@ -264,8 +269,6 @@ export class RaceSession {
         if (isLocal(e.kart)) {
           audio.play('finish');
           audio.play(e.place <= 3 ? 'cheer' : 'lose');
-          const p = kpos(e.kart);
-          if (p) this.fx.burst(p.x, p.y + 2, p.z, ['#ff4d6d', '#ffd23f', '#3ec1ff', '#7cff6a', '#ffffff'], 80, 10);
           this.fireworks?.finale();
         }
         break;
@@ -288,8 +291,6 @@ export class RaceSession {
         if (ch === 'grandma') audio.play('laugh', { volume: vol, pitch: 1.3 });
         if (ch === 'dad') audio.play('laugh', { volume: vol, pitch: 0.75 });
         if (e.special === 'momShield') audio.play('shield', { volume: vol });
-        const p = kpos(e.kart);
-        if (p) this.fx.burst(p.x, p.y + 1.5, p.z, [characterById(ch).colors.primary, '#ffffff'], 30, 6);
         break;
       }
       case 'hit': {
@@ -300,8 +301,6 @@ export class RaceSession {
           audio.play(this.sim.karts[e.kart].character === 'lupin' ? 'bark' : 'ouch', { volume: 0.8 });
         }
         if (e.by >= 0 && this.sim.karts[e.by]?.character === 'grandma' && isLocal(e.by)) audio.play('laugh', { pitch: 1.3 });
-        const p = kpos(e.kart);
-        if (p) this.fx.burst(p.x, p.y + 1, p.z, ['#ffd23f', '#ffffff', '#ff7b2e'], 30, 7);
         break;
       }
       case 'shieldBlock':
@@ -310,7 +309,10 @@ export class RaceSession {
       case 'boost':
         if (isLocal(e.kart)) audio.play('boost', { pitch: e.kind === 'drift3' ? 1.2 : 1 });
         else audio.play('boost', { volume: this.volFor(e.kart) * 0.5 });
-        if (isLocal(e.kart)) this.cameraFor(e.kart)?.addShake(0.15);
+        if (isLocal(e.kart)) {
+          this.cameraFor(e.kart)?.addShake(0.15);
+          this.cameraFor(e.kart)?.kick(e.kind === 'drift3' || e.kind === 'rocket' || e.kind === 'special' ? 1 : 0.6);
+        }
         break;
       case 'driftStart':
         if (isLocal(e.kart)) audio.play('driftStart');
@@ -330,8 +332,6 @@ export class RaceSession {
       case 'bump': {
         const vol = Math.max(this.volFor(e.a), this.volFor(e.b));
         audio.play('bump', { volume: vol * Math.min(1, e.impact / 8) });
-        const a = kpos(e.a), b = kpos(e.b);
-        if (a && b) this.fx.glow.emit({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + 0.8, z: (a.z + b.z) / 2, spread: 4, color: '#fff6a0', size: 0.4, life: 0.35, count: 10, gravity: 8 });
         if (isLocal(e.a) || isLocal(e.b)) this.cameraFor(isLocal(e.a) ? e.a : e.b)?.addShake(0.3);
         break;
       }
@@ -339,8 +339,6 @@ export class RaceSession {
         if (isLocal(e.kart)) {
           audio.play('wall', { volume: Math.min(1, e.impact / 10) });
           this.cameraFor(e.kart)?.addShake(Math.min(0.5, e.impact / 20));
-          const p = kpos(e.kart);
-          if (p) this.fx.glow.emit({ x: p.x, y: p.y + 0.6, z: p.z, spread: 4, color: '#ffe08a', size: 0.3, life: 0.3, count: 12, gravity: 10 });
         }
         break;
       case 'respawn':
@@ -382,6 +380,7 @@ export class RaceSession {
     this.scenery?.update(dt, this.sim.time > 0 ? this.sim.time : t);
     this.trackView?.update(dt, t);
     this.ghostView?.update(this.sim.time);
+    if (dt > 0) this.vfx?.update(dt);
     if (dt > 0) this.fx?.update(dt);
     this.night?.update();
     // engines
@@ -420,7 +419,16 @@ export class RaceSession {
         const cam = this.cameras[i];
         if (dt > 0) cam.update(this.cameraTarget(p, p.playerIndex), dt);
         const rect: [number, number, number, number] = this.players.length === 1 ? [0, 0, 1, 1] : i === 0 ? [0, 0.5, 1, 0.5] : [0, 0, 1, 0.5];
-        viewports.push({ camera: cam.camera, rect, fx: { speed: Math.max(0, p.forwardSpeed) / p.tuning.maxSpeed, boost: p.boostTime > 0 ? 1 : 0 } });
+        const hit = this.vfx?.hit[i];
+        const boosting = p.boostTime > 0 && p.respawnTime <= 0;
+        viewports.push({
+          camera: cam.camera, rect,
+          fx: {
+            speed: Math.max(0, p.forwardSpeed) / p.tuning.maxSpeed, boost: boosting ? 1 : 0,
+            hit: hit?.amount ?? 0, hitColor: hit?.color,
+            heatWorld: boosting && !cam.isRearView ? this.kartViews[p.id].exhaustWorld(this.heatTmp[i]) : undefined,
+          },
+        });
       });
       this.env.follow(this.kartViews[this.players[0].id].interpPos, this.cameras[0].camera);
       this.fx.setViewportHeight(this.renderer.height / this.players.length);
@@ -507,6 +515,7 @@ export class RaceSession {
     audio.setDrift(false, 0);
     this.kartViews.forEach((v) => v.dispose());
     this.items?.dispose();
+    this.vfx?.dispose();
     this.fx?.dispose();
     this.night?.dispose();
     this.fireworks?.dispose();

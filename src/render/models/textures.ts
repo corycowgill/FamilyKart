@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { CharacterId } from '../../sim/types';
+import { getModelQuality } from './lod';
 
 /**
  * Procedural CanvasTextures: faces (per expression), suit prints, emblems, kart decals, tyre treads.
@@ -15,24 +16,31 @@ function hasDom(): boolean {
   return typeof document !== 'undefined' && typeof document.createElement === 'function';
 }
 
-export function canvasTex(key: string, w: number, h: number, draw: (ctx: Ctx, w: number, h: number) => void, opts?: { repeatU?: boolean }): THREE.Texture | null {
+/**
+ * Cached canvas texture. `opts.scale` renders the canvas at `scale` x the logical size (the draw
+ * callback still works in logical w/h pixels) so decals stay crisp in close-ups.
+ */
+export function canvasTex(key: string, w: number, h: number, draw: (ctx: Ctx, w: number, h: number) => void, opts?: { repeatU?: boolean; scale?: number }): THREE.Texture | null {
+  const sc = opts?.scale ?? 1;
+  if (sc !== 1) key += `@${sc}`;
   if (texCache.has(key)) return texCache.get(key)!;
   if (!hasDom()) {
     texCache.set(key, null);
     return null;
   }
   const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
+  c.width = Math.round(w * sc);
+  c.height = Math.round(h * sc);
   const ctx = c.getContext('2d');
   if (!ctx) {
     texCache.set(key, null);
     return null;
   }
+  if (sc !== 1) ctx.scale(sc, sc);
   draw(ctx, w, h);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
+  t.anisotropy = sc > 1 ? 8 : 4;
   if (opts?.repeatU) t.wrapS = THREE.RepeatWrapping;
   t.userData.shared = true;
   texCache.set(key, t);
@@ -82,13 +90,20 @@ export function eyeAngles(st: FaceStyle): Array<[number, number]> {
   ];
 }
 
+/** Decal / face texture supersampling for the current model quality. */
+export function texScale(kind: 'face' | 'decal'): number {
+  const q = getModelQuality();
+  if (kind === 'face') return q === 'high' ? 1.5 : 1;
+  return q === 'high' ? 2 : q === 'medium' ? 1.5 : 1;
+}
+
 export function faceTexture(id: CharacterId, st: FaceStyle, expr: Expression): THREE.Texture | null {
   return canvasTex(`face:${id}:${expr}`, FACE.size, FACE.size, (ctx, w, h) => {
     ctx.fillStyle = st.skin;
     ctx.fillRect(0, 0, w, h);
     if (st.dog) drawDogFace(ctx, st, expr);
     else drawHumanFace(ctx, st, expr);
-  });
+  }, { scale: texScale('face') });
 }
 
 function rgba(hex: string, a: number): string {
@@ -125,29 +140,70 @@ function eyeOpen(ctx: Ctx, st: FaceStyle, x: number, y: number, r: number, side:
   ctx.fillStyle = '#ffffff';
   ctx.fill();
   ctx.clip();
+  // soft lid shadow on the white (reads as a real eyeball under a lid)
+  {
+    const sg = ctx.createLinearGradient(x, y - r, x, y + r);
+    sg.addColorStop(0, 'rgba(120,80,70,0.38)');
+    sg.addColorStop(0.35, 'rgba(160,120,110,0.08)');
+    sg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(x - rx * 1.2, y - r * 1.2, rx * 2.4, r * 2.4);
+  }
   // iris
   const ix = x + (opts.lookX ?? -side * 0.08) * r;
   const iy = y + (opts.lookY ?? 0.08) * r;
   const ir = r * 0.66 * (opts.pupil ?? 1);
-  const g = ctx.createRadialGradient(ix, iy - ir * 0.3, ir * 0.1, ix, iy, ir);
-  g.addColorStop(0, shade(st.iris, 1.35));
-  g.addColorStop(0.7, st.iris);
-  g.addColorStop(1, shade(st.iris, 0.55));
+  const g = ctx.createRadialGradient(ix, iy + ir * 0.25, ir * 0.1, ix, iy, ir);
+  g.addColorStop(0, shade(st.iris, 1.55));
+  g.addColorStop(0.45, shade(st.iris, 1.15));
+  g.addColorStop(0.8, st.iris);
+  g.addColorStop(1, shade(st.iris, 0.45));
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(ix, iy, ir, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#120c0a';
+  // fibrous iris streaks + dark limbal ring
+  ctx.save();
   ctx.beginPath();
-  ctx.arc(ix, iy, ir * 0.5, 0, Math.PI * 2);
+  ctx.arc(ix, iy, ir, 0, Math.PI * 2);
+  ctx.clip();
+  for (let i = 0; i < 36; i++) {
+    const a = (i / 36) * Math.PI * 2;
+    ctx.strokeStyle = i % 2 ? rgba(shade(st.iris, 1.6), 0.35) : rgba(shade(st.iris, 0.6), 0.3);
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(ix + Math.cos(a) * ir * 0.45, iy + Math.sin(a) * ir * 0.45);
+    ctx.lineTo(ix + Math.cos(a + 0.05) * ir * 0.92, iy + Math.sin(a + 0.05) * ir * 0.92);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = rgba(shade(st.iris, 0.3), 0.85);
+  ctx.lineWidth = ir * 0.14;
+  ctx.beginPath();
+  ctx.arc(ix, iy, ir * 0.95, 0, Math.PI * 2);
+  ctx.stroke();
+  // upper lid casts a shadow over the iris top
+  const ls = ctx.createLinearGradient(ix, iy - ir, ix, iy);
+  ls.addColorStop(0, 'rgba(0,0,0,0.45)');
+  ls.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = ls;
+  ctx.fillRect(ix - ir, iy - ir, ir * 2, ir);
+  ctx.restore();
+  ctx.fillStyle = '#0c0807';
+  ctx.beginPath();
+  ctx.arc(ix, iy, ir * 0.48, 0, Math.PI * 2);
   ctx.fill();
-  // highlights
+  // highlights: big soft key catchlight + small fill sparkle
+  const hl = ctx.createRadialGradient(ix - ir * 0.36, iy - ir * 0.4, 0, ix - ir * 0.36, iy - ir * 0.4, ir * 0.36);
+  hl.addColorStop(0, 'rgba(255,255,255,1)');
+  hl.addColorStop(0.75, 'rgba(255,255,255,0.95)');
+  hl.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = hl;
+  ctx.beginPath();
+  ctx.arc(ix - ir * 0.36, iy - ir * 0.4, ir * 0.36, 0, Math.PI * 2);
+  ctx.fill();
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
-  ctx.arc(ix - ir * 0.35, iy - ir * 0.4, ir * 0.28, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(ix + ir * 0.35, iy + ir * 0.3, ir * 0.12, 0, Math.PI * 2);
+  ctx.arc(ix + ir * 0.38, iy + ir * 0.32, ir * 0.12, 0, Math.PI * 2);
   ctx.fill();
   // upper lid (determined / sad)
   if (opts.lid) {
@@ -257,13 +313,42 @@ function openMouth(ctx: Ctx, st: FaceStyle, x: number, y: number, w: number, dep
   ctx.fillStyle = '#5b1418';
   ctx.fill();
   ctx.clip();
-  // tongue
-  ctx.fillStyle = '#e8606c';
+  // throat depth
+  {
+    const dg = ctx.createRadialGradient(x, y + depth * 0.45, 2, x, y + depth * 0.45, w * 0.5);
+    dg.addColorStop(0, '#2a0507');
+    dg.addColorStop(1, 'rgba(91,20,24,0)');
+    ctx.fillStyle = dg;
+    ctx.fillRect(x - w / 2, y - 6, w, depth * 1.4);
+  }
+  // tongue with a soft highlight + centre groove
+  {
+    const tg = ctx.createRadialGradient(x - w * 0.06, y + depth * 0.82, 2, x, y + depth * 1.0, w * 0.32);
+    tg.addColorStop(0, '#ff9aa4');
+    tg.addColorStop(0.6, '#e8606c');
+    tg.addColorStop(1, '#b8404c');
+    ctx.fillStyle = tg;
+    ctx.beginPath();
+    ctx.ellipse(x, y + depth * 1.0, w * 0.3, depth * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(150,40,52,0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y + depth * 0.66);
+    ctx.lineTo(x, y + depth * 0.95);
+    ctx.stroke();
+  }
+  // gum line above the teeth
+  ctx.fillStyle = '#c95a64';
   ctx.beginPath();
-  ctx.ellipse(x, y + depth * 1.0, w * 0.3, depth * 0.45, 0, 0, Math.PI * 2);
+  ctx.moveTo(x - w / 2, y - 6);
+  ctx.quadraticCurveTo(x, y + topCurve - 6, x + w / 2, y - 6);
+  ctx.lineTo(x + w / 2, y + 2);
+  ctx.quadraticCurveTo(x, y + topCurve + 2, x - w / 2, y + 2);
+  ctx.closePath();
   ctx.fill();
   // upper teeth
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = '#fbfaf6';
   ctx.beginPath();
   ctx.moveTo(x - w / 2, y - 4);
   ctx.quadraticCurveTo(x, y + topCurve - 4, x + w / 2, y - 4);
@@ -271,6 +356,22 @@ function openMouth(ctx: Ctx, st: FaceStyle, x: number, y: number, w: number, dep
   ctx.quadraticCurveTo(x, y + topCurve + depth * 0.22, x - w / 2, y + depth * 0.16);
   ctx.closePath();
   ctx.fill();
+  // subtle tooth separations + shading under the lip
+  ctx.strokeStyle = 'rgba(170,160,150,0.55)';
+  ctx.lineWidth = 1.2;
+  for (let i = -3; i <= 3; i++) {
+    const tx = x + i * w * 0.085;
+    const ty = y + topCurve * (1 - (2 * Math.abs(tx - x)) / w) * 0.9;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty - 2);
+    ctx.lineTo(tx, ty + depth * 0.14);
+    ctx.stroke();
+  }
+  const ts = ctx.createLinearGradient(x, y - 4, x, y + depth * 0.2);
+  ts.addColorStop(0, 'rgba(120,60,60,0.35)');
+  ts.addColorStop(1, 'rgba(120,60,60,0)');
+  ctx.fillStyle = ts;
+  ctx.fillRect(x - w / 2, y - 4, w, depth * 0.2);
   ctx.restore();
   mouthPath(ctx, x, y, w, depth, topCurve);
   ctx.strokeStyle = st.lip;
@@ -685,7 +786,7 @@ export function suitTexture(id: CharacterId, suit: string, accent: string): THRE
       default:
         break;
     }
-  });
+  }, { scale: texScale('decal') });
 }
 
 function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
@@ -914,7 +1015,7 @@ export function hoodTexture(id: CharacterId, kind: EmblemKind, colors: { primary
       default:
         drawEmblem(ctx, kind, cx, cy, 80, {});
     }
-  });
+  }, { scale: texScale('decal') });
 }
 
 const INITIAL: Record<CharacterId, string> = { dad: 'D', mom: 'M', bro1: '1', bro2: '2', lupin: 'L', grandma: 'G' };
@@ -983,7 +1084,7 @@ export function sideTexture(id: CharacterId, kind: EmblemKind, colors: { primary
       drawEmblem(ctx, 'heart', w * 0.18, h * 0.42, 20, { fill: '#ff8fd0', outline: '#ffffff' });
       drawEmblem(ctx, 'heart', w * 0.84, h * 0.3, 15, { fill: '#ffffff', outline: '#ff8fd0' });
     }
-  });
+  }, { scale: texScale('decal') });
 }
 
 /** Tyre tread: chevron grooves around the circumference (u) in the middle band of the profile (v). */
@@ -1040,5 +1141,147 @@ export function bandanaTexture(color: string): THREE.Texture | null {
       [0.12, 0.3], [0.32, 0.65], [0.5, 0.35], [0.68, 0.65], [0.88, 0.3], [0.22, 0.85], [0.78, 0.85], [0.5, 0.82],
     ];
     for (const [x, y] of pts) drawEmblem(ctx, 'paw', x * w, y * h, 13, { fill: '#ffffff' });
-  });
+  }, { scale: texScale('decal') });
+}
+
+/** Rear number plate: racer number on a white plate with the team colour border. */
+export function numberPlateTexture(id: CharacterId, num: string, color: string): THREE.Texture | null {
+  return canvasTex(`plate:${id}`, 256, 128, (ctx, w, h) => {
+    ctx.fillStyle = '#fbfbf7';
+    roundRect(ctx, 4, 4, w - 8, h - 8, 18);
+    ctx.fill();
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = color;
+    roundRect(ctx, 10, 10, w - 20, h - 20, 14);
+    ctx.stroke();
+    ctx.fillStyle = '#16161a';
+    ctx.font = 'bold 84px "Arial Black", "Arial", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(num, w / 2, h / 2 + 6);
+    // bolt dots
+    ctx.fillStyle = '#9aa0a8';
+    for (const x of [26, w - 26]) {
+      ctx.beginPath();
+      ctx.arc(x, h / 2, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, { scale: texScale('decal') });
+}
+
+/**
+ * Tyre tread normal map (u = around the tyre, v = across the lathe profile; tread band in the middle).
+ * Chevron blocks + a centre groove + sidewall ribs, derived from a height field. Linear colour space.
+ */
+export function treadNormalTexture(): THREE.Texture | null {
+  const key = 'treadNormal';
+  if (texCache.has(key)) return texCache.get(key)!;
+  if (!hasDom()) {
+    texCache.set(key, null);
+    return null;
+  }
+  const W = 1024;
+  const H = 128;
+  const hgt = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) hgt[y * W + x] = treadHeight(x / W, y / H);
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d');
+  if (!ctx) {
+    texCache.set(key, null);
+    return null;
+  }
+  const img = ctx.createImageData(W, H);
+  const at = (x: number, y: number) => hgt[Math.min(H - 1, Math.max(0, y)) * W + ((x + W) % W)];
+  const strength = 2.2;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
+      const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y * W + x) * 4;
+      img.data[i] = Math.round(((-dx / len) * 0.5 + 0.5) * 255);
+      img.data[i + 1] = Math.round(((dy / len) * 0.5 + 0.5) * 255);
+      img.data[i + 2] = Math.round(((1 / len) * 0.5 + 0.5) * 255);
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.NoColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  t.userData.shared = true;
+  texCache.set(key, t);
+  return t;
+}
+
+/** Matching tread colour map (same height field): rubber blocks, darker grooves, satin sidewalls. */
+export function treadColorTexture(): THREE.Texture | null {
+  return canvasTex('treadColor', 1024, 256, (ctx, w, h) => {
+    const img = ctx.createImageData(w, h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const hv = treadHeight(x / w, y / h);
+        const side = y / h < 0.22 || y / h > 0.78;
+        const k = side ? 50 : 26 + hv * 20;
+        const i = (y * w + x) * 4;
+        img.data[i] = k;
+        img.data[i + 1] = k;
+        img.data[i + 2] = k + 4;
+        img.data[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    // raised white sidewall lettering on the outer sidewall band (v 0.87..0.97)
+    ctx.font = 'bold 22px "Arial Black", "Arial", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const words = ['FAMILY KART', 'SUPER SLICK', 'FAMILY KART', 'SUPER SLICK'];
+    words.forEach((word, i) => {
+      ctx.fillStyle = 'rgba(232,232,228,0.95)';
+      ctx.fillText(word, ((i + 0.5) / words.length) * w, h * 0.92);
+    });
+    ctx.fillStyle = 'rgba(232,232,228,0.55)';
+    ctx.fillRect(0, h * 0.875, w, 1.5);
+  }, { repeatU: true });
+}
+
+function treadHeight(u: number, v: number): number {
+  const n = 24; // chevrons around
+  let h = 1;
+  if (v > 0.22 && v < 0.78) {
+    const across = (v - 0.5) / 0.28; // -1..1 over the tread band
+    const f = (u * n + Math.abs(across) * 0.55) % 1;
+    if (f < 0.2) h = 0.15; // chevron groove
+    if (Math.abs(across) < 0.07) h = 0.1; // centre groove
+    if (Math.abs(Math.abs(across) - 0.62) < 0.05) h = Math.min(h, 0.35); // shoulder sipes
+  } else h = 0.8 + 0.2 * Math.sin(v * 220); // fine concentric ribs on the shoulders
+  return h;
+}
+
+/** Embroidered round chest badge with the racer's emblem (CircleGeometry uv). */
+export function patchTexture(id: CharacterId, kind: EmblemKind, bg: string, ring: string): THREE.Texture | null {
+  return canvasTex(`patch:${id}`, 256, 256, (ctx, w, h) => {
+    const cx = w / 2;
+    const cy = h / 2;
+    ctx.fillStyle = ring;
+    ctx.beginPath();
+    ctx.arc(cx, cy, w * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = bg;
+    ctx.beginPath();
+    ctx.arc(cx, cy, w * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+    // stitched edge
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([7, 6]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, w * 0.46, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    drawEmblem(ctx, kind, cx, cy, w * 0.26, { outline: '#111111' });
+  }, { scale: texScale('decal') });
 }

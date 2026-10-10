@@ -40,6 +40,17 @@ export class ChaseCamera {
     this.update(t, 1 / 60);
   }
 
+  private rear = false;
+  /** true while the player looks backwards (no exhaust heat shimmer then) */
+  get isRearView(): boolean {
+    return this.rear;
+  }
+
+  /** Boost "punch": an instant FOV burst that the spring then eases back (anticipation -> burst -> settle). */
+  kick(amount: number): void {
+    this.fov += 7 * amount;
+  }
+
   addShake(v: number): void {
     this.shake = Math.min(1, this.shake + v);
   }
@@ -47,6 +58,7 @@ export class ChaseCamera {
   update(t: CameraTarget, dt: number): void {
     const c = this.config;
     const sp01 = Math.min(1.4, Math.max(0, t.speed / t.maxSpeed));
+    this.rear = t.rearView;
     let targetYaw = t.yaw + (t.drifting ? -t.driftDir * 0.18 : 0);
     if (t.rearView) targetYaw += Math.PI;
     if (!this.initialized) {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mod } from '../../core/math';
 import { RAMP_HEIGHT, type Track, type TrackPath, type TrackSample } from '../../sim/track/Track';
 import type { SurfaceType, TrackTheme } from '../../sim/types';
@@ -69,6 +70,12 @@ interface WallProfile {
   tex: () => THREE.Texture;
   texLen: number;
   rough: number;
+  /** optional tangent-space normal map (same uv layout as tex) */
+  nrm?: () => THREE.Texture;
+  /** chain-link catch fence on top at corners */
+  fence?: boolean;
+  /** derive a bump normal map from the colour texture (leafy hedges, lumpy snow banks) */
+  bumpFromTex?: { base: string; strength: number };
 }
 interface WallStrip {
   kind: 'strip';
@@ -103,10 +110,13 @@ interface Style {
 }
 
 const jerseyTex = () =>
-  canvasTexture(256, 64, (g, w, h, rng) => {
+  canvasTexture(512, 128, (g, w, h, rng) => {
     // two 3m panels per tile: red, white
     for (let i = 0; i < 2; i++) {
-      g.fillStyle = i ? '#f4f4f0' : '#e2312b';
+      const grad = g.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, i ? '#fbfbf7' : '#ea3a32');
+      grad.addColorStop(1, i ? '#e2e2dc' : '#c92a24');
+      g.fillStyle = grad;
       g.fillRect((i * w) / 2, 0, w / 2, h);
     }
     g.fillStyle = 'rgba(0,0,0,0.25)';
@@ -114,9 +124,30 @@ const jerseyTex = () =>
     g.fillStyle = 'rgba(255,255,255,0.25)';
     g.fillRect(0, 0, w, h * 0.08);
     g.fillStyle = 'rgba(0,0,0,0.35)';
-    g.fillRect(w / 2 - 1, 0, 2, h);
-    g.fillRect(w - 2, 0, 2, h);
-    for (let i = 0; i < 300; i++) {
+    g.fillRect(w / 2 - 2, 0, 4, h);
+    g.fillRect(w - 3, 0, 3, h);
+    g.fillRect(0, 0, 1, h);
+    // bolts + steel connector plates at the panel joints
+    for (const jx of [0, w / 2, w]) {
+      g.fillStyle = 'rgba(70,74,80,0.9)';
+      g.fillRect(jx - 14, h * 0.24, 28, h * 0.46);
+      for (const bx of [jx - 10, jx + 10]) for (const by of [h * 0.32, h * 0.62]) {
+        g.fillStyle = '#b9bec4';
+        g.beginPath();
+        g.arc(bx, by, 4.5, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = 'rgba(0,0,0,0.4)';
+        g.beginPath();
+        g.arc(bx + 1, by + 1, 2, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    // scuffs from karts
+    for (let i = 0; i < 40; i++) {
+      g.fillStyle = `rgba(30,30,30,${rng.range(0.05, 0.18)})`;
+      g.fillRect(rng.next() * w, h * rng.range(0.7, 0.85), rng.range(8, 40), rng.range(1, 3));
+    }
+    for (let i = 0; i < 600; i++) {
       g.fillStyle = `rgba(0,0,0,${rng.range(0.02, 0.08)})`;
       g.fillRect(rng.next() * w, rng.next() * h, 2, 2);
     }
@@ -209,7 +240,7 @@ const STYLES: Record<TrackTheme, Style> = {
     roadTile: 16, roadRough: 0.88,
     shoulder: shoulderStripes('#6cc04f', '#5fb045', '#d8d4c8'), shoulderTile: 8, shoulderRough: 0.95,
     curb: ['#e3262b', '#f7f7f7'],
-    wall: { kind: 'profile', profile: [[0, 0], [0.12, 0.3], [0.3, 0.75], [0.34, 1.15], [0.66, 1.15], [0.7, 0.75], [0.88, 0.3], [1.0, 0]], tex: jerseyTex, texLen: 6, rough: 0.7 },
+    wall: { kind: 'profile', profile: [[0, 0], [0.12, 0.3], [0.3, 0.75], [0.34, 1.15], [0.66, 1.15], [0.7, 0.75], [0.88, 0.3], [1.0, 0]], tex: jerseyTex, texLen: 6, rough: 0.55, nrm: barrierNormalTex, fence: true },
     wallOffset: 0.2,
     terrain: (c) => grassTexture(c, '#4c9a3b', '#7cc65a', 3),
     terrainTile: 14,
@@ -242,7 +273,7 @@ const STYLES: Record<TrackTheme, Style> = {
       }),
     shoulderTile: 4, shoulderRough: 0.95,
     curb: ['#e3262b', '#f7f7f7'],
-    wall: { kind: 'profile', profile: [[0, 0], [0.05, 1.0], [0.25, 1.45], [0.95, 1.45], [1.15, 1.0], [1.2, 0]], tex: hedgeTex, texLen: 4, rough: 1 },
+    wall: { kind: 'profile', profile: [[0, 0], [0.05, 1.0], [0.25, 1.45], [0.95, 1.45], [1.15, 1.0], [1.2, 0]], tex: hedgeTex, texLen: 4, rough: 1, bumpFromTex: { base: '#3f7d2e', strength: 2.2 } },
     wallOffset: 0.2,
     terrain: (c) => grassTexture(c, '#4f9a3c', '#86cc63', 5, ['#ffffff', '#ffe066']),
     terrainTile: 12,
@@ -329,7 +360,7 @@ const STYLES: Record<TrackTheme, Style> = {
     roadTile: 14, roadRough: 0.75,
     shoulder: shoulderStripes('#f4f8fd', '#e8eff8'), shoulderTile: 10, shoulderRough: 0.9,
     curb: ['#e3262b', '#ffffff'],
-    wall: { kind: 'profile', profile: [[-0.2, 0], [0.05, 0.8], [0.5, 1.45], [1.1, 1.75], [1.9, 1.65], [2.6, 1.05], [3.2, 0.1]], tex: snowbankTex, texLen: 6, rough: 0.85 },
+    wall: { kind: 'profile', profile: [[-0.2, 0], [0.05, 0.8], [0.5, 1.45], [1.1, 1.75], [1.9, 1.65], [2.6, 1.05], [3.2, 0.1]], tex: snowbankTex, texLen: 6, rough: 0.85, bumpFromTex: { base: '#dde6f2', strength: 1.4 } },
     wallOffset: 0.1,
     terrain: () => noiseTexture('#eef3f9', ['#d3deeb', '#ffffff', '#c7d4e6'], 15, ['#dbe5f1', '#ffffff']),
     terrainTile: 16,
@@ -418,39 +449,130 @@ function withUvShade<T extends THREE.MeshStandardMaterial>(mat: T, key: string, 
 }
 
 /**
- * Derive a detail map from the road's colour canvas: R = height (speckle luminance, for a subtle
- * bump), G = roughness (painted lines glossier than the asphalt, slight per-speck variation).
+ * Derive detail maps from the road's colour canvas: `detail` R = height, G = roughness (painted
+ * lines glossier than the asphalt, slight per-speck variation) and a tangent-space `normal` map
+ * (aggregate grain, sunken cracks / tar snakes, slightly raised paint).
  */
-function roadDetailTexture(src: THREE.Texture, baseColor: string, baseRough: number): THREE.Texture | null {
+function roadDetailTextures(src: THREE.Texture, baseColor: string, baseRough: number, withNormal: boolean, normalStrength = 1): { detail: THREE.Texture; normal: THREE.Texture | null } | null {
   const img = src.image as HTMLCanvasElement | undefined;
   if (!img || typeof document === 'undefined' || !(img instanceof HTMLCanvasElement)) return null;
   const c = document.createElement('canvas');
-  c.width = img.width;
-  c.height = img.height;
+  const W = img.width, H = img.height;
+  c.width = W;
+  c.height = H;
   const g = c.getContext('2d', { willReadFrequently: true });
   if (!g) return null;
   g.drawImage(img, 0, 0);
-  const data = g.getImageData(0, 0, c.width, c.height);
+  const data = g.getImageData(0, 0, W, H);
   const d = data.data;
   const b = new THREE.Color(baseColor);
   const baseLum = (b.r + b.g + b.b) / 3;
+  const hgt = withNormal ? new Float32Array(W * H) : null;
   for (let i = 0; i < d.length; i += 4) {
     const lum = (d[i] + d[i + 1] + d[i + 2]) / 765;
     const paint = lum > Math.min(0.97, baseLum + 0.22) && Math.max(d[i], d[i + 1]) > 180;
     const n = ((i * 2654435761) >>> 0) / 4294967296;
     const rough = paint ? 0.38 : Math.min(1, baseRough * (0.86 + 0.24 * n) + (lum - baseLum) * 0.4);
+    if (hgt) {
+      const crack = lum < baseLum - 0.16 ? (baseLum - 0.16 - lum) * 3 : 0;
+      hgt[i / 4] = paint ? 0.75 : Math.min(1, Math.max(0, 0.5 + (lum - baseLum) * 1.2 - crack));
+    }
     d[i] = Math.round(lum * 255);
     d[i + 1] = Math.round(Math.max(0.05, rough) * 255);
     d[i + 2] = 0;
   }
   g.putImageData(data, 0, 0);
+  const mk = (cv: HTMLCanvasElement) => {
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.NoColorSpace;
+    t.wrapS = src.wrapS;
+    t.wrapT = src.wrapT;
+    t.repeat.copy(src.repeat);
+    t.anisotropy = 8;
+    return t;
+  };
+  let normal: THREE.Texture | null = null;
+  if (hgt) {
+    const nc = document.createElement('canvas');
+    nc.width = W;
+    nc.height = H;
+    const ng = nc.getContext('2d')!;
+    const nd = ng.createImageData(W, H);
+    const k = 2.2 * normalStrength * (W / 256);
+    const at = (x: number, y: number) => hgt[((y + H) % H) * W + ((x + W) % W)];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * k, dy = (at(x, y + 1) - at(x, y - 1)) * k;
+      const l = Math.hypot(dx, dy, 1);
+      const o = (y * W + x) * 4;
+      nd.data[o] = (-dx / l * 0.5 + 0.5) * 255;
+      nd.data[o + 1] = (dy / l * 0.5 + 0.5) * 255;
+      nd.data[o + 2] = (1 / l * 0.5 + 0.5) * 255;
+      nd.data[o + 3] = 255;
+    }
+    ng.putImageData(nd, 0, 0);
+    normal = mk(nc);
+  }
+  return { detail: mk(c), normal };
+}
+
+/** Normal map for jersey barrier panels: seams between 3 m panels, bolt heads, chamfered top. */
+function barrierNormalTex(): THREE.Texture {
+  const W = 512, H = 128;
+  const hgt = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let h = 0.5;
+    const px = x % (W / 2);
+    if (px < 3 || px > W / 2 - 3) h = 0.1; // panel seam groove
+    // bolt heads near each seam, two rows
+    for (const bx of [10, W / 2 - 10]) for (const by of [H * 0.32, H * 0.62]) {
+      const r = Math.hypot(px - bx, y - by);
+      if (r < 5) h = Math.max(h, 0.5 + 0.45 * Math.sqrt(1 - (r / 5) ** 2));
+    }
+    // horizontal reinforcing rib
+    if (Math.abs(y - H * 0.47) < 2) h += 0.12;
+    hgt[y * W + x] = h;
+  }
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  const id = g.createImageData(W, H);
+  const at = (x: number, y: number) => hgt[Math.min(H - 1, Math.max(0, y)) * W + ((x + W) % W)];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const dx = (at(x + 1, y) - at(x - 1, y)) * 3, dy = (at(x, y + 1) - at(x, y - 1)) * 3;
+    const l = Math.hypot(dx, dy, 1);
+    const o = (y * W + x) * 4;
+    id.data[o] = (-dx / l * 0.5 + 0.5) * 255;
+    id.data[o + 1] = (dy / l * 0.5 + 0.5) * 255;
+    id.data[o + 2] = (1 / l * 0.5 + 0.5) * 255;
+    id.data[o + 3] = 255;
+  }
+  g.putImageData(id, 0, 0);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.NoColorSpace;
-  t.wrapS = src.wrapS;
-  t.wrapT = src.wrapT;
-  t.repeat.copy(src.repeat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.anisotropy = 8;
   return t;
+}
+
+/** Chain-link catch-fence texture (alpha-tested diamonds + a top rail). */
+function chainLinkTex(): THREE.Texture {
+  return canvasTexture(128, 128, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(200,206,214,1)';
+    g.lineWidth = 2.2;
+    const s = 16;
+    for (let k = -h; k < w + h; k += s) {
+      g.beginPath();
+      g.moveTo(k, 0);
+      g.lineTo(k + h, h);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(k, h);
+      g.lineTo(k + h, 0);
+      g.stroke();
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ build */
@@ -485,17 +607,19 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
   const tex = (t: THREE.Texture) => own(t);
 
   /* ---------- road, shoulders */
-  const roadTex = tex(roadTexture(style.road, 7 + def.id.length));
+  const roadScale = quality === 'high' ? 4 : quality === 'medium' ? 2 : 1;
+  const roadTex = tex(roadTexture(style.road, 7 + def.id.length, roadScale));
   const roadMat = own(new THREE.MeshStandardMaterial({ map: roadTex, roughness: style.roadRough, metalness: 0 }));
   if (quality !== 'low') {
-    const detail = roadDetailTexture(roadTex, style.road.base, style.roadRough);
-    if (detail) {
-      own(detail);
-      roadMat.roughnessMap = detail;
+    const maps = roadDetailTextures(roadTex, style.road.base, style.roadRough, true, style.road.style === 'placemat' ? 0.4 : style.road.style === 'dirt' ? 1.2 : style.road.style === 'snow' ? 0.35 : 1);
+    if (maps) {
+      own(maps.detail);
+      roadMat.roughnessMap = maps.detail;
       roadMat.roughness = 1;
-      if (quality === 'high') {
-        roadMat.bumpMap = detail;
-        roadMat.bumpScale = 0.9;
+      if (maps.normal) {
+        own(maps.normal);
+        roadMat.normalMap = maps.normal;
+        roadMat.normalScale.setScalar(quality === 'high' ? 0.85 : 0.6);
       }
     }
   }
@@ -577,7 +701,8 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
   }));
   const curbMat = own(new THREE.MeshStandardMaterial({ map: curbTex, roughness: 0.42, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }));
   // rounded "bevel" shading across the curb
-  withUvShade(curbMat, 'curb', 'return 0.72 + 0.36 * sin(clamp(aoUv.x, 0.0, 1.0) * 3.14159);');
+  if (quality === 'low') withUvShade(curbMat, 'curb', 'return 0.72 + 0.36 * sin(clamp(aoUv.x, 0.0, 1.0) * 3.14159);');
+  else withUvShade(curbMat, 'curb2', 'return 0.9 + 0.1 * sin(clamp(aoUv.x, 0.0, 1.0) * 3.14159);');
   const curbGB = new GB();
   for (const p of track.paths) {
     const n = p.samples.length;
@@ -600,8 +725,37 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
     };
     const w = p.id === 0 ? 1.3 : 0.9;
     const y = p.id === 0 ? 0.09 : 0.07;
-    ribbon(curbGB, p, (s) => -s.halfWidth - w + 0.3, (s) => -s.halfWidth + 0.3, y, 3, keep);
-    ribbon(curbGB, p, (s) => s.halfWidth - 0.3, (s) => s.halfWidth + w - 0.3, y, 3, keep);
+    if (quality === 'low') {
+      ribbon(curbGB, p, (s) => -s.halfWidth - w + 0.3, (s) => -s.halfWidth + 0.3, y, 3, keep);
+      ribbon(curbGB, p, (s) => s.halfWidth - 0.3, (s) => s.halfWidth + w - 0.3, y, 3, keep);
+    } else {
+      // bevelled rumble-strip profile: ramps up from the road, rounded crown, short drop outside
+      const prof: Array<[number, number]> = quality === 'high'
+        ? [[0, -0.02], [0.08, 0.03], [0.22, 0.075], [0.4, 0.1], [0.62, 0.1], [0.8, 0.082], [0.92, 0.045], [1, -0.01]]
+        : [[0, -0.02], [0.2, 0.07], [0.5, 0.1], [0.85, 0.07], [1, -0.01]];
+      for (const side of [-1, 1]) {
+        const sq = seq(p);
+        let prev: number[] | null = null;
+        for (let k = 0; k < sq.length; k++) {
+          const i = sq[k];
+          if (!keep(i)) {
+            prev = null;
+            continue;
+          }
+          const smp = p.samples[i];
+          const v = sOf(p, k, i) / 3;
+          const row = prof.map(([u, hy]) => {
+            const lat = side * (smp.halfWidth - 0.3 + u * w);
+            return curbGB.vert(smp.x + smp.nx * lat, smp.y + y - 0.04 + hy, smp.z + smp.nz * lat, side > 0 ? u : 1 - u, v);
+          });
+          if (prev) for (let j = 0; j < prof.length - 1; j++) {
+            if (side > 0) curbGB.quad(prev[j], row[j], prev[j + 1], row[j + 1]);
+            else curbGB.quad(prev[j + 1], row[j + 1], prev[j], row[j]);
+          }
+          prev = row;
+        }
+      }
+    }
   }
   addMesh(curbGB, curbMat, { name: 'curbs' });
 
@@ -613,6 +767,18 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
       ? new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9, alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: true })
       : new THREE.MeshStandardMaterial({ map: wallTex, roughness: wallStyle.rough, side: THREE.DoubleSide, vertexColors: true }),
   );
+  if (wallStyle.kind === 'profile' && wallStyle.nrm && quality !== 'low') {
+    const wm = wallMat as THREE.MeshStandardMaterial;
+    wm.normalMap = tex(wallStyle.nrm());
+    wm.normalScale.setScalar(0.9);
+  } else if (wallStyle.kind === 'profile' && wallStyle.bumpFromTex && quality !== 'low') {
+    const maps = roadDetailTextures(wallTex, wallStyle.bumpFromTex.base, wallStyle.rough, true, wallStyle.bumpFromTex.strength);
+    if (maps?.normal) {
+      own(maps.detail).dispose();
+      const wm = wallMat as THREE.MeshStandardMaterial;
+      wm.normalMap = tex(maps.normal);
+    }
+  }
   // ambient occlusion baked into vertex colours: darker at the wall foot
   const aoCol = (h: number) => wallAo.setScalar(0.6 + 0.4 * Math.min(1, Math.max(0, h / 0.8)));
   const wallAo = new THREE.Color();
@@ -728,6 +894,84 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
     }
   }
   addMesh(wallGB, wallMat, { cast: true, name: 'walls' });
+
+  /* ---------- catch fences (chain-link + posts) on top of the barriers through the corners */
+  if (wallStyle.kind === 'profile' && wallStyle.fence && quality !== 'low') {
+    const fenceGB = new GB();
+    const railGB = new GB();
+    const posts: THREE.Matrix4[] = [];
+    const top = Math.max(...wallStyle.profile.map((q) => q[1])) - 0.05;
+    const mid = (wallStyle.profile[0][0] + wallStyle.profile[wallStyle.profile.length - 1][0]) / 2;
+    const FH = 2.5;
+    for (const p of track.paths) {
+      if (p.id !== 0) continue;
+      const n = p.samples.length;
+      const curv = p.samples.map((_, i) => {
+        let c = 0;
+        for (let k = -4; k <= 4; k++) c += p.samples[p.closed ? mod(i + k, n) : Math.min(n - 1, Math.max(0, i + k))].curvature;
+        return c / 9;
+      });
+      for (const side of [-1, 1]) {
+        const ok = (i: number) => {
+          const smp = p.samples[i];
+          if (smp.gap || Math.abs(curv[i]) < 0.014) return false;
+          // only on the outside of the corner (where cars would fly)
+          if (Math.sign(curv[i]) === side) return false;
+          const l = side * (wallDistOf(smp) + style.wallOffset + mid);
+          return !field.insideOther(smp.x + smp.nx * l, smp.z + smp.nz * l, p.id, -0.2);
+        };
+        let prevA = -1, prevB = -1, prevR0 = -1, prevR1 = -1, run = 0, d = 0;
+        let px = 0, pz = 0, lastPost = -99;
+        for (let k = 0; k <= n; k++) {
+          const i = p.closed ? k % n : Math.min(k, n - 1);
+          if (k === n && !p.closed) break;
+          if (!ok(i)) {
+            prevA = -1;
+            run = 0;
+            continue;
+          }
+          const smp = p.samples[i];
+          const l = side * (wallDistOf(smp) + style.wallOffset + mid);
+          const x = smp.x + smp.nx * l, z = smp.z + smp.nz * l;
+          if (run > 0) d += Math.hypot(x - px, z - pz);
+          px = x;
+          pz = z;
+          const A = fenceGB.vert(x, smp.y + top, z, d / 2.5, 0);
+          const B = fenceGB.vert(x, smp.y + top + FH, z, d / 2.5, 1);
+          const R0 = railGB.vert(x, smp.y + top + FH - 0.04, z, 0, 0);
+          const R1 = railGB.vert(x, smp.y + top + FH + 0.08, z, 0, 1);
+          if (prevA >= 0) {
+            fenceGB.quad(prevA, A, prevB, B);
+            railGB.quad(prevR0, R0, prevR1, R1);
+          }
+          prevA = A;
+          prevB = B;
+          prevR0 = R0;
+          prevR1 = R1;
+          if (run === 0 || d - lastPost >= 3.2) {
+            posts.push(new THREE.Matrix4().makeTranslation(x, smp.y + top + FH / 2, z));
+            lastPost = d;
+          }
+          run++;
+        }
+      }
+    }
+    const fenceTex = tex(chainLinkTex());
+    fenceTex.repeat.set(1, 1);
+    const fenceMat = own(new THREE.MeshStandardMaterial({ map: fenceTex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.4, metalness: 0.6, color: 0xdfe4ea }));
+    addMesh(fenceGB, fenceMat, { name: 'catchFence', receive: false });
+    const steelMat = own(new THREE.MeshStandardMaterial({ color: 0x9aa3ad, roughness: 0.35, metalness: 0.7, side: THREE.DoubleSide }));
+    addMesh(railGB, steelMat, { name: 'catchFenceRail', receive: false });
+    if (posts.length) {
+      const pg = own(new THREE.CylinderGeometry(0.05, 0.06, FH + 0.15, 6));
+      const im = new THREE.InstancedMesh(pg, steelMat, posts.length);
+      posts.forEach((m, i) => im.setMatrixAt(i, m));
+      im.castShadow = quality === 'high';
+      im.name = 'catchFencePosts';
+      im.computeBoundingSphere();
+      group.add(im);
+    }
+  }
 
   // gap abutments: vertical faces where the road ends at a gap
   for (const p of track.paths) {
@@ -952,19 +1196,51 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
     const s0 = track.sampleAt(0, 0);
     const wd = wallDistOf(s0) + 1;
     const gantry = new THREE.Group();
-    const pillarMat = own(new THREE.MeshStandardMaterial({ color: style.accent, roughness: 0.5 }));
-    const pillarGeo = own(new THREE.BoxGeometry(1.2, 9, 1.2));
+    const fine = quality !== 'low';
+    const parts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]> = [];
+    const acc = style.accent, acc2 = style.accent2, steel = '#c9ced6';
+    const T = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
+    const strut = (a: number[], c: number[], r: number, col: string) => {
+      const d = new THREE.Vector3(c[0] - a[0], c[1] - a[1], c[2] - a[2]);
+      const len = d.length();
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+      parts.push([new THREE.CylinderGeometry(r, r, len, 6), col, new THREE.Matrix4().compose(new THREE.Vector3((a[0] + c[0]) / 2, (a[1] + c[1]) / 2, (a[2] + c[2]) / 2), q, new THREE.Vector3(1, 1, 1))]);
+    };
     for (const side of [-1, 1]) {
-      const m = new THREE.Mesh(pillarGeo, pillarMat);
-      m.position.set(side * wd, 4.5, 0);
-      m.castShadow = true;
-      gantry.add(m);
+      const x = side * wd;
+      if (fine) {
+        // square truss tower: four chords, horizontal rings and zig-zag diagonals
+        for (const [cx, cz] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) strut([x + cx, 0, cz], [x + cx, 9, cz], 0.09, acc);
+        for (let y = 0.5; y <= 9; y += 1.5) {
+          parts.push([new THREE.BoxGeometry(1.1, 0.08, 0.08), acc, T(x, y, 0.5)]);
+          parts.push([new THREE.BoxGeometry(1.1, 0.08, 0.08), acc, T(x, y, -0.5)]);
+          parts.push([new THREE.BoxGeometry(0.08, 0.08, 1.1), acc, T(x - 0.5, y, 0)]);
+          parts.push([new THREE.BoxGeometry(0.08, 0.08, 1.1), acc, T(x + 0.5, y, 0)]);
+          if (y + 1.5 <= 9.1) for (const fz of [-0.5, 0.5]) strut([x - 0.5, y, fz], [x + 0.5, y + 1.5, fz], 0.05, steel);
+        }
+        parts.push([new THREE.BoxGeometry(1.8, 0.5, 1.8), '#5d636b', T(x, 0.25, 0)]);
+        // sponsor panel on the inner face of each tower
+        parts.push([new THREE.BoxGeometry(0.1, 3.2, 1.0), '#ffffff', T(x - side * 0.56, 4.2, 0)]);
+        parts.push([new THREE.BoxGeometry(0.11, 0.6, 1.02), acc2, T(x - side * 0.56, 5.4, 0)]);
+      } else {
+        parts.push([new THREE.BoxGeometry(1.2, 9, 1.2), acc, T(x, 4.5, 0)]);
+      }
     }
-    const beamGeo = own(new THREE.BoxGeometry(wd * 2 + 1.2, 2.6, 1));
-    const beam = new THREE.Mesh(beamGeo, own(new THREE.MeshStandardMaterial({ color: style.accent2, roughness: 0.5 })));
-    beam.position.y = 9.6;
-    beam.castShadow = true;
-    gantry.add(beam);
+    // overhead truss beam
+    const span = wd * 2 + 1.2;
+    parts.push([new THREE.BoxGeometry(span, 2.6, 1), acc2, T(0, 9.6, 0)]);
+    if (fine) {
+      for (const [y, z] of [[11.0, 0.55], [11.0, -0.55], [8.2, 0.55], [8.2, -0.55]]) parts.push([new THREE.BoxGeometry(span + 0.3, 0.16, 0.16), steel, T(0, y, z)]);
+      for (let x = -wd; x < wd; x += 1.4) for (const z of [0.55, -0.55]) strut([x, 8.2, z], [x + 1.4, 11.0, z], 0.05, steel);
+      // start-light housing with five light pairs + visor plates
+      parts.push([new THREE.BoxGeometry(6.4, 1.4, 0.6), '#1b1e23', T(0, 7.6, -0.75)]);
+      for (let i = 0; i < 5; i++) parts.push([new THREE.BoxGeometry(0.9, 0.08, 0.4), '#1b1e23', T((i - 2) * 1.2, 8.15, -1.15)]);
+      for (const sx of [-1, 1]) strut([sx * 2.6, 8.3, -0.6], [sx * 2.6, 8.8, -0.4], 0.06, steel);
+    }
+    const frame = new THREE.Mesh(own(mergeColoredLocal(parts)), own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.35 })));
+    frame.castShadow = true;
+    frame.receiveShadow = true;
+    gantry.add(frame);
     const banner = new THREE.Mesh(
       own(new THREE.PlaneGeometry(Math.min(wd * 2 - 2, 22), 2.2)),
       own(new THREE.MeshBasicMaterial({ map: tex(textTexture(def.name.toUpperCase(), { bg: style.accent2, fg: '#ffffff', stroke: '#00000055', w: 1024, h: 128 })), side: THREE.DoubleSide })),
@@ -983,9 +1259,10 @@ export function buildTrackView(track: Track, quality: Quality): TrackViewHandle 
     // start lights
     const lightGeo = own(new THREE.SphereGeometry(0.35, 12, 8));
     const lightMat = own(new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2a2a, emissiveIntensity: 2.6 }));
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < (quality !== 'low' ? 10 : 4); i++) {
       const m = new THREE.Mesh(lightGeo, lightMat);
-      m.position.set((i - 1.5) * 1.2, 8.0, -0.6);
+      if (quality !== 'low') m.position.set(((i % 5) - 2) * 1.2, 7.85 - Math.floor(i / 5) * 0.55 + 0.25, -1.08);
+      else m.position.set((i - 1.5) * 1.2, 8.0, -0.6);
       gantry.add(m);
     }
     gantry.position.set(s0.x, s0.y, s0.z);
@@ -1162,4 +1439,24 @@ function waterPalette(theme: TrackTheme, landmarks: Array<{ kind: string }>, sty
     default:
       return { channel: style.water ? { deep: style.water, shallow: style.waterLight } : WATER_COLORS.pond, lake: WATER_COLORS.pond };
   }
+}
+
+/** Merge [geometry, colour, matrix] parts into one vertex-coloured geometry (local helper). */
+function mergeColoredLocal(parts: Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>): THREE.BufferGeometry {
+  const c = new THREE.Color();
+  const geos = parts.map(([g, col, m]) => {
+    const geo = g.index ? g.toNonIndexed() : g.clone();
+    g.dispose();
+    if (m) geo.applyMatrix4(m);
+    for (const k of Object.keys(geo.attributes)) if (k !== 'position' && k !== 'normal') geo.deleteAttribute(k);
+    c.set(col);
+    const n = geo.attributes.position.count;
+    const arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) arr.set([c.r, c.g, c.b], i * 3);
+    geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    return geo;
+  });
+  const out = mergeGeometries(geos, false)!;
+  geos.forEach((g) => g.dispose());
+  return out;
 }

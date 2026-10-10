@@ -175,3 +175,83 @@ export function disposeTree(root: THREE.Object3D): void {
     for (const mat of mats) if (mat && !mat.userData.shared) mat.dispose();
   });
 }
+
+// ---------------------------------------------------------------------------------------------
+// HD stylised PBR materials
+// ---------------------------------------------------------------------------------------------
+
+/** Soft matte fabric with a cloth sheen rim (racing suits, seats, bandanas). */
+export function fabric(color: string, roughness = 0.78, map: THREE.Texture | null = null, key = ''): THREE.MeshPhysicalMaterial {
+  return cachedMat(`fabric:${color}:${roughness}:${key}`, () => {
+    const c = new THREE.Color(color);
+    const sheen = c.clone().lerp(new THREE.Color('#ffffff'), 0.55);
+    return new THREE.MeshPhysicalMaterial({
+      color: map ? '#ffffff' : color, map, roughness, metalness: 0, sheen: 1, sheenRoughness: 0.45, sheenColor: sheen,
+    });
+  });
+}
+
+/** Warm stylised skin: soft spec + reddish sheen and a hint of emissive warmth (fake subsurface). */
+export function skinMat(color: string, map: THREE.Texture | null = null, key = ''): THREE.MeshPhysicalMaterial {
+  return cachedMat(`skin:${color}:${key}`, () => {
+    const warm = new THREE.Color(color).lerp(new THREE.Color('#ff5a3c'), 0.5);
+    return new THREE.MeshPhysicalMaterial({
+      color: map ? '#ffffff' : color, map, roughness: 0.55, metalness: 0, sheen: 0.35, sheenRoughness: 0.5, sheenColor: warm,
+      emissive: new THREE.Color(color).multiply(new THREE.Color('#ff7050')), emissiveIntensity: 0.07, specularIntensity: 0.6,
+    });
+  });
+}
+
+/** Rubber: dark, rough, slight sheen. */
+export function rubber(color = '#232327'): THREE.MeshPhysicalMaterial {
+  return cachedMat(`rubber:${color}`, () =>
+    new THREE.MeshPhysicalMaterial({ color, roughness: 0.82, metalness: 0, sheen: 0.4, sheenRoughness: 0.6, sheenColor: new THREE.Color('#6a6a70') }),
+  );
+}
+
+/** Brushed / machined metal (engine, brake discs). */
+export function brushed(color = '#9ea4ad', roughness = 0.38): THREE.MeshStandardMaterial {
+  return cachedMat(`brushed:${color}:${roughness}`, () => new THREE.MeshStandardMaterial({ color, roughness, metalness: 1 }));
+}
+
+/** Glossy clear-coated plastic (glasses frames, helmets, trim). */
+export function glossy(color: string, roughness = 0.3): THREE.MeshPhysicalMaterial {
+  return cachedMat(`glossy:${color}:${roughness}`, () =>
+    new THREE.MeshPhysicalMaterial({ color, roughness, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.05 }),
+  );
+}
+
+/** Glass lens: mostly transparent with crisp reflections. */
+export function lensMat(): THREE.MeshPhysicalMaterial {
+  return cachedMat('hdlens', () =>
+    new THREE.MeshPhysicalMaterial({
+      color: '#dff0ff', transparent: true, opacity: 0.16, roughness: 0.03, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02,
+      depthWrite: false, envMapIntensity: 1.6, side: THREE.DoubleSide,
+    }),
+  );
+}
+
+/** Wet cornea gloss: adds only specular highlights/reflections on top of the painted eye. */
+export function corneaMat(): THREE.MeshPhysicalMaterial {
+  return cachedMat('cornea', () =>
+    new THREE.MeshPhysicalMaterial({
+      color: '#000000', roughness: 0.04, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, envMapIntensity: 0.6, specularIntensity: 1,
+    }),
+  );
+}
+
+/** Wet glossy nose leather / eyes for the dog. */
+export function wetMat(color: string): THREE.MeshPhysicalMaterial {
+  return cachedMat(`wet:${color}`, () => new THREE.MeshPhysicalMaterial({ color, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.15 }));
+}
+
+/** Vertex-coloured hair/fur with a soft sheen (per-instance colour x root->tip gradient). */
+export function hairMat(key = 'hair', roughness = 0.6, sheenColor = '#fff2dc', sheen = 0.5): THREE.MeshPhysicalMaterial {
+  return cachedMat(`hdhair:${key}:${roughness}:${sheenColor}:${sheen}`, () =>
+    new THREE.MeshPhysicalMaterial({
+      color: '#ffffff', roughness, metalness: 0, vertexColors: true, sheen, sheenRoughness: 0.35, sheenColor: new THREE.Color(sheenColor),
+      specularIntensity: 0.7,
+    }),
+  );
+}
