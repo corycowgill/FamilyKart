@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { PostFX, type PostConfig } from './PostFX';
+import { setModelQuality } from './models/lod';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -135,6 +136,7 @@ export class Renderer {
   }
 
   setQuality(q: Quality): void {
+    setModelQuality(q);
     this.quality = q;
     const tier = this.ultra ? ULTRA_TIER : QUALITY_TIERS[q];
     const dpr = Math.min(window.devicePixelRatio || 1, tier.dprMax);

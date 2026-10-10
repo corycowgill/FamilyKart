@@ -3,6 +3,7 @@ import { characterById } from '../data/characters';
 import type { GhostData } from '../persist/Save';
 import { buildCharacter } from './models/characterModels';
 import { buildKart } from './models/kartModels';
+import { enableAutoLod } from './models/lod';
 
 /** Translucent replay of the best time-trial run, sampled at 10 Hz and interpolated. */
 export class GhostView {
@@ -25,6 +26,7 @@ export class GhostView {
         o.castShadow = false;
       }
     });
+    enableAutoLod(this.root);
   }
 
   update(raceTime: number): void {
