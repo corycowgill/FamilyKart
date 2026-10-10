@@ -94,6 +94,22 @@ Collision uses a custom track-relative system rather than Rapier: karts are proj
 splines, which gives walls, surfaces, shortcuts and gaps, and kart-to-kart contact is resolved with
 sphere impulses. This keeps the simulation deterministic and fast enough to run hundreds of races headless.
 
+### Graphics
+
+All art is generated in code; there are no asset files. The style aims for stylized AAA: soft
+bevelled shapes, rich lighting, and chunky cartoon effects.
+
+- **Racers and karts** are built at three detail levels and switch with distance (`render/models/lod.ts`).
+  Settings → Graphics quality picks which levels are built: Low builds only the lightest, High builds all three.
+- **Scenery** uses instanced props in spatial clusters that simplify or disappear with distance, plus
+  procedural brick, stone and glass materials and a near-detail layer on buildings.
+- **Effects** (`render/vfx/`) draw from a hand-drawn sprite atlas: particles, shockwave rings, lightning
+  arcs, wind streaks and a bubble shield.
+- **Post-processing** adds HDR bloom, colour grading and ambient occlusion, plus radial blur and heat
+  shimmer while boosting on High.
+- **Ultra graphics** (Settings, for powerful PCs) raises resolution, bloom levels, ambient occlusion and
+  shadow-map size. The game turns Ultra off first if the frame rate drops.
+
 ## Deploying to Render.com
 `render.yaml` defines a static site: build `npm ci && npm run build`, publish `dist/`, with immutable caching for hashed assets.
 In Render, create a **Blueprint** from this repository, or a **Static Site** with those settings.
