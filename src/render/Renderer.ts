@@ -164,7 +164,8 @@ export class Renderer {
         gl.render(scene, v.camera);
       });
       gl.shadowMap.autoUpdate = prevShadowAuto;
-      post.finish(scene, viewports.map((v) => ({ rect: v.rect, speed: v.fx?.speed ?? 0, boost: v.fx?.boost ?? 0 })), this.width, this.height);
+      const flare = scene.userData.sunFlare as { dir: THREE.Vector3 } | undefined;
+      post.finish(scene, viewports.map((v) => ({ rect: v.rect, speed: v.fx?.speed ?? 0, boost: v.fx?.boost ?? 0, sun: flare ? sunScreen(v.camera, flare.dir) : undefined })), this.width, this.height);
       return;
     }
     gl.setRenderTarget(null);
@@ -196,4 +197,18 @@ export class Renderer {
       cam.updateProjectionMatrix();
     }
   }
+}
+
+const tmpSun = new THREE.Vector3();
+const tmpFwd = new THREE.Vector3();
+/** Sun position in viewport uv (0..1) plus a 0..1 visibility (in front of the camera, fading off-screen). */
+function sunScreen(cam: THREE.PerspectiveCamera, dir: THREE.Vector3): [number, number, number] {
+  cam.getWorldDirection(tmpFwd);
+  const facing = tmpFwd.dot(dir);
+  if (facing <= 0.05) return [0, 0, 0];
+  tmpSun.copy(cam.position).addScaledVector(dir, 1000).project(cam);
+  const x = tmpSun.x * 0.5 + 0.5, y = tmpSun.y * 0.5 + 0.5;
+  const edge = Math.max(Math.abs(tmpSun.x), Math.abs(tmpSun.y));
+  const vis = Math.min(1, Math.max(0, (1.25 - edge) / 0.35)) * Math.min(1, (facing - 0.05) * 4);
+  return [x, y, vis];
 }

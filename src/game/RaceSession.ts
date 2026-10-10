@@ -17,6 +17,9 @@ import { sceneryFor } from '../render/scenery';
 import type { SceneryHandle } from '../render/scenery/types';
 import { buildTrackView } from '../render/track/TrackView';
 import { GhostView } from '../render/GhostView';
+import { Fireworks } from '../render/Fireworks';
+import { NightLights } from '../render/NightLights';
+import { isChicagoTrack, resolveTimeOfDay, type TimeOfDay } from '../render/timeOfDay';
 
 export interface SessionOptions {
   track: TrackDef;
@@ -26,6 +29,8 @@ export interface SessionOptions {
   seed?: number;
   ghost?: GhostData;
   steeringAssist?: boolean[];
+  /** Lighting preset; 'day' (default) = the track's own authored lighting. `?tod=` in the URL overrides. */
+  timeOfDay?: TimeOfDay;
 }
 
 type SessionListener = (e: SimEvent) => void;
@@ -62,6 +67,10 @@ export class RaceSession {
   private debugGroup: THREE.Group | null = null;
   debug = false;
   private lastInputs: KartInput[] = [];
+  /** resolved time of day for this race */
+  readonly timeOfDay: TimeOfDay;
+  private night: NightLights | null = null;
+  private fireworks: Fireworks | null = null;
 
   constructor(private renderer: Renderer, private input: Input | null, readonly opts: SessionOptions) {
     this.track = new Track(opts.track);
@@ -74,6 +83,7 @@ export class RaceSession {
       timeLimit: opts.mode === 'attract' ? 1e9 : 900,
     });
     this.players = this.sim.karts.filter((k) => k.isHuman).sort((a, b) => a.playerIndex - b.playerIndex);
+    this.timeOfDay = resolveTimeOfDay(opts.timeOfDay);
   }
 
   on(fn: SessionListener): void {
@@ -85,9 +95,13 @@ export class RaceSession {
     onProgress(0.1, 'Paving the track…');
     const lighting = this.opts.track.lighting;
     const indoor = this.opts.track.theme === 'kitchen';
-    this.env = new Environment(this.scene, lighting, q, this.opts.track.theme);
-    this.scene.environment = indoor ? this.renderer.envMap() : this.renderer.skyEnvMap(lighting, this.env.sunDir);
-    this.scene.environmentIntensity = indoor ? 0.4 : 0.5;
+    // time of day is known before any scenery is built (scenery may read scene/group userData.timeOfDay)
+    this.scene.userData.timeOfDay = this.timeOfDay;
+    this.sceneryGroup.userData.timeOfDay = this.timeOfDay;
+    this.env = new Environment(this.scene, lighting, q, this.opts.track.theme, this.timeOfDay, this.opts.track);
+    const tl = this.env.tod;
+    this.scene.environment = indoor ? this.renderer.envMap() : this.renderer.skyEnvMap(tl ? tl.lighting : lighting, this.env.sunDir);
+    this.scene.environmentIntensity = (indoor ? 0.4 : 0.5) * (tl ? tl.envIntensity / 0.5 : 1);
     this.trackView = buildTrackView(this.track, q);
     this.scene.add(this.trackView.group);
     await tick();
@@ -105,6 +119,20 @@ export class RaceSession {
     this.items = new ItemsView(this.sim);
     this.scene.add(this.items.group);
     this.fx = new Effects(this.scene, q, this.opts.track.theme);
+    if (tl) {
+      this.fx.setNight(tl.night);
+      const spotKart = this.players[0] ? this.kartViews[this.players[0].id] : null;
+      this.night = new NightLights({
+        scene: this.scene, track: this.track, look: tl, quality: q,
+        dressRoots: [this.sceneryGroup, this.trackView.group], trackGroup: this.trackView.group,
+        kartViews: this.kartViews, spotKart, moonDir: this.env.sunDir,
+      });
+      if (tl.fireworks > 0 && q !== 'low' && isChicagoTrack(this.opts.track)) {
+        this.fireworks = new Fireworks(this.opts.track, q, tl.fireworks);
+        this.fireworks.onFlash = (c, a) => this.env.flash(c, a);
+        this.scene.add(this.fireworks.points);
+      }
+    }
     if (this.opts.ghost && this.opts.mode === 'timeTrial') {
       this.ghostView = new GhostView(this.opts.ghost);
       this.scene.add(this.ghostView.root);
@@ -227,6 +255,7 @@ export class RaceSession {
           audio.play(e.place <= 3 ? 'cheer' : 'lose');
           const p = kpos(e.kart);
           if (p) this.fx.burst(p.x, p.y + 2, p.z, ['#ff4d6d', '#ffd23f', '#3ec1ff', '#7cff6a', '#ffffff'], 80, 10);
+          this.fireworks?.finale();
         }
         break;
       case 'itemPickup':
@@ -343,6 +372,7 @@ export class RaceSession {
     this.trackView?.update(dt, t);
     this.ghostView?.update(this.sim.time);
     if (dt > 0) this.fx?.update(dt);
+    this.night?.update();
     // engines
     this.players.forEach((p, i) => {
       const e = this.engines[i];
@@ -370,6 +400,9 @@ export class RaceSession {
       this.updateSpectator(dt);
       this.env.follow(this.kartViews[this.spectatorTarget]?.interpPos ?? new THREE.Vector3(), this.spectatorCam);
       this.fx.setViewportHeight(this.renderer.height);
+      this.night?.setViewportHeight(this.renderer.height);
+      this.fireworks?.setViewportHeight(this.renderer.height);
+      this.fireworks?.update(dt, this.spectatorCam);
       viewports.push({ camera: this.spectatorCam, rect: [0, 0, 1, 1] });
     } else {
       this.players.forEach((p, i) => {
@@ -380,6 +413,9 @@ export class RaceSession {
       });
       this.env.follow(this.kartViews[this.players[0].id].interpPos, this.cameras[0].camera);
       this.fx.setViewportHeight(this.renderer.height / this.players.length);
+      this.night?.setViewportHeight(this.renderer.height / this.players.length);
+      this.fireworks?.setViewportHeight(this.renderer.height / this.players.length);
+      this.fireworks?.update(dt, this.cameras[0].camera);
     }
     this.renderer.render(this.scene, viewports);
   }
@@ -460,6 +496,8 @@ export class RaceSession {
     this.kartViews.forEach((v) => v.dispose());
     this.items?.dispose();
     this.fx?.dispose();
+    this.night?.dispose();
+    this.fireworks?.dispose();
     this.scenery?.dispose?.();
     this.trackView?.dispose();
     this.env?.dispose();

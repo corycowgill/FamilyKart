@@ -21,7 +21,7 @@ export type SfxName =
   | 'countdown' | 'go' | 'lap' | 'finalLap' | 'finish' | 'victory' | 'lose'
   | 'itemPickup' | 'itemRoulette' | 'itemGranted' | 'launch' | 'drop' | 'shield' | 'shieldBlock'
   | 'boost' | 'driftStart' | 'driftTier1' | 'driftTier2' | 'driftTier3' | 'jump' | 'land'
-  | 'bump' | 'wall' | 'hit' | 'respawn' | 'special' | 'bark' | 'laugh' | 'cheer' | 'ouch';
+  | 'bump' | 'wall' | 'hit' | 'respawn' | 'special' | 'bark' | 'laugh' | 'cheer' | 'ouch' | 'gust';
 
 export interface EngineVoice {
   /** speed01: 0..1+ of max speed, throttle -1..1 */
@@ -44,6 +44,8 @@ const THROTTLE_S = 0.05;
 const MAX_SFX_VOICES = 20;
 const MUSIC_LOOKAHEAD = 0.18;
 const MUSIC_TICK_MS = 25;
+/** Music level (pre-curve) while ducked under the announcer: 0.75 -> about -5 dB. */
+const DUCK_LEVEL = 0.75;
 
 interface ActiveSfx {
   name: SfxName;
@@ -72,6 +74,10 @@ export class AudioEngine {
   private musicTimer: ReturnType<typeof setInterval> | null = null;
   private pendingMusic: unknown = null;
   private intensity = 0;
+
+  private ducked = false;
+  private pausedFlag = false;
+  private pauseListeners: Array<(paused: boolean) => void> = [];
 
   private drift: DriftSynth | null = null;
   private driftOn = false;
@@ -162,12 +168,53 @@ export class AudioEngine {
       else g.gain.setTargetAtTime(target, t, 0.03);
     };
     set(this.chain.input, this.master);
-    set(this.chain.music, this.music);
+    set(this.chain.music, this.music * (this.ducked ? DUCK_LEVEL : 1));
     set(this.chain.sfx, this.sfx);
+  }
+
+  /** Duck the music bus slightly (e.g. while the race announcer speaks). Safe before init. */
+  duckMusic(on: boolean): void {
+    if (this.ducked === on) return;
+    this.ducked = on;
+    const ctx = this.ctx;
+    if (!ctx || !this.chain) return;
+    try {
+      const v = this.music * (on ? DUCK_LEVEL : 1);
+      // duck quickly, recover gently
+      this.chain.music.gain.setTargetAtTime(v * v, ctx.currentTime, on ? 0.06 : 0.25);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** True while the music is ducked. */
+  get isDucked(): boolean {
+    return this.ducked;
+  }
+
+  /** True between setPaused(true) and setPaused(false) (tracked even before init). */
+  get isPaused(): boolean {
+    return this.pausedFlag;
+  }
+
+  /** Get notified on setPaused() (e.g. the announcer stops talking). Returns an unsubscribe function. */
+  onPauseChange(fn: (paused: boolean) => void): () => void {
+    this.pauseListeners.push(fn);
+    return () => {
+      this.pauseListeners = this.pauseListeners.filter((f) => f !== fn);
+    };
   }
 
   /** Pause/resume all audio (e.g. pause menu). Safe before init. */
   setPaused(paused: boolean): void {
+    this.pausedFlag = paused;
+    for (const fn of this.pauseListeners) {
+      try {
+        fn(paused);
+      } catch {
+        /* ignore */
+      }
+    }
     if (!this.ctx) return;
     if (paused) void this.ctx.suspend().catch(() => {});
     else void this.ctx.resume().catch(() => {});

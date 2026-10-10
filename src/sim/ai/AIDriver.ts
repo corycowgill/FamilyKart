@@ -363,6 +363,15 @@ export class AIDriver {
       case 'mysteryBox':
         use = true;
         break;
+      case 'windyGust': {
+        // best when it catches a pack: 2+ racers (not shielded) within ~80 m ahead
+        const caught = sim.karts.filter((o) => {
+          const gap = o.raceDistance - k.raceDistance;
+          return o !== k && !o.finished && gap > 0 && gap < 80 && o.shieldTime <= 0 && o.invulnTime <= 0;
+        }).length;
+        use = caught >= 2 || (caught === 1 && this.rng.chance(0.08)) || this.rng.chance(0.03 * (1 - skill));
+        break;
+      }
     }
     if (use) {
       input.useItem = true;

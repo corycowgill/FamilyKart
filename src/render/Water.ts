@@ -48,6 +48,10 @@ export function createWaterMaterial(o: WaterOptions): WaterMaterial {
       scale: { value: 1 / (o.scale ?? 1) },
       opacity: { value: o.opacity ?? 1 },
       flow: { value: (o.flow ?? new THREE.Vector2(0.6, 0.25)).clone() },
+      /** night: elongated moon / city-light reflection column (0 = off, daytime look unchanged) */
+      glintStretch: { value: 0 },
+      /** warm city-light shimmer on the water at night (0 = off) */
+      cityGlow: { value: new THREE.Color(0, 0, 0) },
     },
   ]);
   const mat = new THREE.ShaderMaterial({
@@ -68,7 +72,7 @@ export function createWaterMaterial(o: WaterOptions): WaterMaterial {
       }`,
     fragmentShader: /* glsl */ `
       uniform vec3 deep; uniform vec3 shallow; uniform vec3 skyTop; uniform vec3 skyHorizon; uniform vec3 sunCol; uniform vec3 sunDir;
-      uniform float time; uniform float scale; uniform float opacity; uniform vec2 flow;
+      uniform float time; uniform float scale; uniform float opacity; uniform vec2 flow; uniform float glintStretch; uniform vec3 cityGlow;
       varying vec3 vWorld;
       #include <common>
       #include <fog_pars_fragment>
@@ -104,6 +108,16 @@ export function createWaterMaterial(o: WaterOptions): WaterMaterial {
         vec3 c = mix(body, refl, clamp(fres * 0.6, 0.0, 1.0));
         float sd = max(dot(r, sunDir), 0.0);
         c += sunCol * (pow(sd, 220.0) * 6.0 + pow(sd, 18.0) * 0.12);
+        if (glintStretch > 0.0) {
+          // moonlight path: the glint smeared toward the viewer (matches azimuth, broad in elevation)
+          vec2 rh = normalize(r.xz + 1e-5), sh = normalize(sunDir.xz + 1e-5);
+          float az = max(dot(rh, sh), 0.0);
+          float el = abs(r.y - sunDir.y);
+          float ripple = 0.55 + 0.45 * sin(hgt * 18.0 + vWorld.x * 0.7 + time * 2.0);
+          float col = pow(az, 700.0) * smoothstep(0.75, 0.0, el) * ripple;
+          c += sunCol * col * glintStretch * 2.2;
+          c += cityGlow * fres * (0.6 + 0.4 * ripple);
+        }
         #if SPARKLE
         {
           vec2 cell = floor(vWorld.xz * 1.2);

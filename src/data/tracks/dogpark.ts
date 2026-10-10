@@ -42,9 +42,9 @@ const hollowLog = trimShortcutStart(points, roundedOpen(
 
 export const DOGPARK: TrackDef = {
   id: 'dogpark',
-  name: "Lupin's Dog Park",
+  name: "Lupin's Dog Beach",
   theme: 'dogpark',
-  description: 'Fetch! Jump the creek, splash through mud and dash through the hollow log.',
+  description: 'Fetch on the Lake Michigan shore! Jump the creek, splash through mud, dash through the hollow log and wave at the skyline.',
   difficulty: 2,
   laps: 3,
   points,
@@ -99,9 +99,10 @@ export const DOGPARK: TrackDef = {
     { kind: 'agility', x: 80, z: -100 },
     { kind: 'fireHydrant', x: 120, z: -110 },
     { kind: 'hollowLog', x: 184, z: -170 },
+    { kind: 'shore', x: 485, z: 0, scale: 50 },
   ],
   lighting: {
-    skyTop: '#46a2f0', skyBottom: '#dff3ff', fog: '#d3ecf7', fogNear: 220, fogFar: 1100,
+    skyTop: '#46a2f0', skyBottom: '#dff3ff', fog: '#d3ecf7', fogNear: 260, fogFar: 1500,
     sun: '#fff4dc', sunIntensity: 2.7, ambient: '#cfe6ff', ground: '#6fbf4c',
   },
   music: { tempo: 150, root: 67, scale: 'major', style: 'bouncy' },

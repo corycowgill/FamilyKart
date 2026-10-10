@@ -1,6 +1,8 @@
 /** Dev page for auditioning every procedural sound (audio-preview.html). */
 import { audio, type EngineVoice, type SfxName } from '../audio/AudioEngine';
+import { announce, announceIntro, isAnnouncerEnabled, setAnnouncerEnabled, type AnnounceContext } from '../audio/announcer';
 import { MUSIC_STYLES, MusicPlayer, resolveMusic } from '../audio/music';
+import type { SimEvent } from '../sim/types';
 import { renderSfx, SFX_NAMES } from '../audio/sfx';
 import { buildMasterChain } from '../audio/synth';
 import { EngineSynth } from '../audio/voices';
@@ -116,6 +118,33 @@ const driftDiv = $('drift');
 for (const tier of [0, 1, 2, 3]) button(driftDiv, `drift tier ${tier}`, () => audio.setDrift(true, tier));
 button(driftDiv, 'drift off', () => audio.setDrift(false, 0));
 
+// announcer (Web Speech; silently unavailable in some browsers / headless)
+const annDiv = $('announcer');
+const annCtx: AnnounceContext = { isLocal: (k) => k === 0, name: (k) => ['Dad', 'Mom', 'Lupin'][k] ?? 'Racer', place: () => 2, track: 'the Chicago Grand Prix', laps: 3 };
+const annEvents: Array<[string, SimEvent]> = [
+  ['GO', { type: 'go' }],
+  ['lap 2', { type: 'lap', kart: 0, lap: 2, time: 41.2 }],
+  ['final lap', { type: 'finalLap', kart: 0 }],
+  ['overtake', { type: 'overtake', kart: 0, passed: 1 }],
+  ['hit (pizza)', { type: 'hit', kart: 0, by: 1, cause: 'pizza' }],
+  ['hit (pothole)', { type: 'hit', kart: 0, by: 1, cause: 'pothole' }],
+  ['gust (+ whoosh)', { type: 'gust', kart: 0, victims: [1, 2] }],
+  ['finish 1st', { type: 'finish', kart: 0, place: 1, time: 95 }],
+  ['finish 3rd', { type: 'finish', kart: 0, place: 3, time: 99 }],
+  ['finish 5th', { type: 'finish', kart: 0, place: 5, time: 110 }],
+];
+button(annDiv, 'intro', () => announceIntro('the Chicago Grand Prix'));
+for (const [label, e] of annEvents) button(annDiv, label, () => announce(e, annCtx));
+button(annDiv, 'spam 10 events', () => annEvents.forEach(([, e]) => announce(e, annCtx)));
+const annToggle = button(annDiv, 'announcer ON', (b) => {
+  setAnnouncerEnabled(!isAnnouncerEnabled());
+  b.textContent = `announcer ${isAnnouncerEnabled() ? 'ON' : 'OFF'}`;
+});
+void annToggle;
+let pausedPreview = false;
+button(annDiv, 'pause / resume', () => audio.setPaused((pausedPreview = !pausedPreview)));
+$('annStatus').textContent = typeof speechSynthesis !== 'undefined' ? 'speechSynthesis available' : 'speechSynthesis unavailable (announcer is a no-op)';
+
 // ------------------------------------------------------------------ offline measurement
 
 export interface RenderStats {
@@ -165,6 +194,22 @@ async function renderAll(): Promise<RenderStats[]> {
   for (const n of SFX_NAMES) out.push(await renderOffline('sfx', n, 2.8));
   for (const s of MUSIC_STYLES) out.push(await renderOffline('music', s, 8));
   out.push(await renderOffline('music', 'rock!', 8));
+  // long renders that reach the section changes ("L train" fills) and the results crowd chant
+  out.push({ ...(await renderOffline('music', 'rock', 40)), name: 'music:rock (40 s, L train)' });
+  out.push({ ...(await renderOffline('music', 'blues', 30)), name: 'music:blues (30 s, L train)' });
+  out.push({ ...(await renderOffline('music', 'snow', 30)), name: 'music:snow (30 s, L train)' });
+  out.push({ ...(await renderOffline('music', 'results', 16)), name: 'music:results (16 s, chant)' });
+  // victory tag over the results music (what the results screen plays)
+  {
+    const sr = 44100;
+    const octx = new OfflineAudioContext(2, sr * 5, sr);
+    const chain = buildMasterChain(octx);
+    renderSfx(octx, chain.sfx, 'victory', 0.01);
+    const p = new MusicPlayer(octx, chain.music, resolveMusic('results'));
+    p.start(0, 0.3);
+    p.scheduleUntil(5);
+    out.push(stats('stack:victory + results music', await octx.startRendering()));
+  }
   // worst case: many SFX stacked at once
   {
     const sr = 44100;

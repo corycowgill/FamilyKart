@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Rng } from '../../core/rng';
-import { Batch, type Bag, boxUV, flagGeometry, flagMaterial, M, mergeColored, type Placer, PROPS, setInstance, tintMaskMat, vcMat, windowedMaterial } from './common';
-import { canvasTexture, chicagoBannerTexture, cityEnvTexture, dotTexture, drawChicagoFlag, flagTexture, windowLitTexture, windowTexture } from './textures';
+import { Batch, type Bag, boxUV, flagGeometry, flagMaterial, M, mergeColored, type Placer, PROPS, setInstance, timeOfDay, tintMaskMat, vcMat, windowedMaterial } from './common';
+import { canvasTexture, chicagoBannerTexture, cityEnvTexture, dotTexture, drawChicagoFlag, drawChicagoSkyline, flagTexture, windowLitTexture, windowTexture } from './textures';
 
 /**
  * Reusable, stylised Chicago landmarks shared by the Chicago Grand Prix, Snowpocalypse and the
@@ -159,6 +159,23 @@ export class SignAtlas {
       p.dispose();
     }
   }
+  /**
+   * Any geometry (uv 0..1, e.g. a cylinder side or a box) showing `r`, placed by m. Lets labels wrap
+   * round tins, book covers etc. while still sharing the one atlas material.
+   */
+  mapped(r: Rect, geo: THREE.BufferGeometry, m?: THREE.Matrix4): void {
+    const S = this.size;
+    let g = geo.index ? geo.toNonIndexed() : geo;
+    if (g !== geo) geo.dispose();
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+    const uv = g.attributes.uv as THREE.BufferAttribute;
+    for (let i = 0; i < uv.count; i++) {
+      const u = Math.min(1, Math.max(0, uv.getX(i))), v = Math.min(1, Math.max(0, uv.getY(i)));
+      uv.setXY(i, (r.x + 1 + u * (r.w - 2)) / S, 1 - (r.y + 1 + (1 - v) * (r.h - 2)) / S);
+    }
+    if (m) g = g.applyMatrix4(m);
+    this.geos.push(g);
+  }
   get count(): number {
     return this.geos.length;
   }
@@ -204,6 +221,8 @@ export interface KitOpts {
   lit: number;
   snow: boolean;
   quality: Quality;
+  /** paint atlas size (default 1024) */
+  atlas?: number;
 }
 
 export class Kit {
@@ -213,7 +232,7 @@ export class Kit {
   readonly steel: P = [];
   /** unlit glowing bulbs / neon (blooms) */
   readonly glow: P = [];
-  readonly paint = new SignAtlas(1024);
+  readonly paint: SignAtlas;
   readonly neon = new SignAtlas(512);
   readonly updaters: Array<(dt: number, t: number) => void> = [];
   readonly time = { value: 0 };
@@ -227,6 +246,7 @@ export class Kit {
   private batches: Batch[] = [];
   private people: Array<{ m: THREE.Matrix4; c: string }> = [];
   constructor(readonly bag: Bag, readonly group: THREE.Group, readonly o: KitOpts) {
+    this.paint = new SignAtlas(o.atlas ?? 1024);
     this.solidMat = vcMat(bag, { roughness: 0.78 });
     this.glossMat = vcMat(bag, { roughness: 0.3, metalness: 0.35 });
     this.steelMat = vcMat(bag, { roughness: 0.2, metalness: 0.7, side: THREE.DoubleSide });
@@ -2046,7 +2066,7 @@ export function buildChicagoFlag(k: Kit, scale = 1): { add(x: number, y: number,
  * Lake Michigan east of x = shoreX: animated water plane, seawall + railing along the shore and
  * `boats` sailboats cruising (animated). zRange limits the seawall / boat lanes.
  */
-export function buildLakeMichigan(k: Kit, shoreX: number, zRange: [number, number], boats = 16): THREE.MeshStandardMaterial {
+export function buildLakeMichigan(k: Kit, shoreX: number, zRange: [number, number], boats = 16, o: { plane?: boolean; seawall?: boolean; boatX?: [number, number] } = {}): THREE.MeshStandardMaterial {
   const rng = new Rng(77);
   const waterTex = k.bag.add(waterTextureLocal('#2b8be0', '#bfe9ff'));
   waterTex.repeat.set(220, 220);
@@ -2056,14 +2076,16 @@ export function buildLakeMichigan(k: Kit, shoreX: number, zRange: [number, numbe
   lake.position.set(shoreX + 2500 - 4, -0.9, (zRange[0] + zRange[1]) / 2);
   lake.receiveShadow = true;
   lake.name = 'lakeMichigan';
-  k.group.add(lake);
+  if (o.plane !== false) k.group.add(lake);
   k.updaters.push((dt) => {
     waterTex.offset.x += dt * 0.004;
     waterTex.offset.y += dt * 0.0025;
   });
   const [z0, z1] = [zRange[0] - 400, zRange[1] + 400];
-  k.solid.push([new THREE.BoxGeometry(3, 2.2, z1 - z0), '#d8d2c4', M.t(shoreX - 1.5, -0.9, (z0 + z1) / 2)]);
-  k.solid.push([new THREE.BoxGeometry(0.3, 0.9, z1 - z0), '#5a6470', M.t(shoreX - 0.2, 0.6, (z0 + z1) / 2)]);
+  if (o.seawall !== false) {
+    k.solid.push([new THREE.BoxGeometry(3, 2.2, z1 - z0), '#d8d2c4', M.t(shoreX - 1.5, -0.9, (z0 + z1) / 2)]);
+    k.solid.push([new THREE.BoxGeometry(0.3, 0.9, z1 - z0), '#5a6470', M.t(shoreX - 0.2, 0.6, (z0 + z1) / 2)]);
+  }
   if (boats <= 0) return lakeMat;
   const sail = new THREE.BufferGeometry();
   sail.setAttribute('position', new THREE.Float32BufferAttribute([0, 1.2, 0.2, 0, 9, 0.2, 0, 1.2, -3.4, 0, 1.2, 0.2, 0, 1.2, -3.4, 0, 9, 0.2], 3));
@@ -2081,7 +2103,8 @@ export function buildLakeMichigan(k: Kit, shoreX: number, zRange: [number, numbe
     [jib, '#ff6b6b'],
   ]));
   const mat = tintMaskMat(k.bag, { roughness: 0.6, side: THREE.DoubleSide });
-  const data = Array.from({ length: boats }, () => ({ x: shoreX + rng.range(60, 600), z: rng.range(z0, z1), yaw: rng.range(-0.6, 0.6) + (rng.chance(0.5) ? Math.PI : 0), v: rng.range(1.5, 4), ph: rng.next() * 6 }));
+  const [bx0, bx1] = o.boatX ?? [60, 600];
+  const data = Array.from({ length: boats }, () => ({ x: shoreX + rng.range(bx0, bx1), z: rng.range(z0, z1), yaw: rng.range(-0.6, 0.6) + (rng.chance(0.5) ? Math.PI : 0), v: rng.range(1.5, 4), ph: rng.next() * 6 }));
   const im = new THREE.InstancedMesh(geo, mat, boats);
   const cols = ['#ffffff', '#ffe066', '#ff8fab', '#9be7ff', '#ffffff', '#c3f584', '#41B6E6'];
   data.forEach((_, i) => im.setColorAt(i, new THREE.Color(cols[i % cols.length])));
@@ -2205,4 +2228,661 @@ export function basculeLeaf(k: Kit, x: number, y: number, z: number, yaw: number
   k.solid.push([new THREE.BoxGeometry(5, 6, 5), '#e8dcc0', L(b, M.t(0, 3, -6))]);
   k.solid.push([new THREE.ConeGeometry(4, 3, 4).rotateY(Math.PI / 4), '#3f8f7a', L(b, M.t(0, 7.5, -6))]);
   k.solid.push([new THREE.BoxGeometry(1.6, 1.6, 0.2), '#1d2b3f', L(b, M.t(0, 3.6, -3.45))]);
+}
+
+/* ================================================================== atmosphere helpers */
+
+/**
+ * Let distant objects (a skyline across the lake) take only part of the scene fog, so they read as
+ * hazy silhouettes instead of vanishing. Patches every material under root (chains onBeforeCompile).
+ */
+export function hazeObject(root: THREE.Object3D, amount = 0.55): void {
+  const done = new Set<THREE.Material>();
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = false;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      if (!mat || done.has(mat)) continue;
+      done.add(mat);
+      const prev = mat.onBeforeCompile;
+      const prevKey = mat.customProgramCacheKey.bind(mat);
+      mat.onBeforeCompile = (sh, r) => {
+        prev.call(mat, sh, r);
+        sh.fragmentShader = sh.fragmentShader.replace(
+          '#include <fog_fragment>',
+          `#ifdef USE_FOG
+            #ifdef FOG_EXP2
+              float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+            #else
+              float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+            #endif
+            gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor * ${amount.toFixed(3)} );
+          #endif`,
+        );
+      };
+      mat.customProgramCacheKey = () => `${prevKey()}|haze${amount}`;
+      mat.needsUpdate = true;
+    }
+  });
+}
+
+/** Low-poly seagull (wings spread, +Z forward). */
+export function seagullGeo(): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.5, -1.4, 0.45, -0.1, 0, 0, -0.4, 0, 0, 0.5, 0, 0, -0.4, 1.4, 0.45, -0.1], 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(12).fill(0), 2));
+  g.computeVertexNormals();
+  return mergeColored([
+    [g, '#ffffff'],
+    [new THREE.ConeGeometry(0.18, 1.2, 5).rotateX(Math.PI / 2), '#f0f0f0', M.t(0, 0, 0.1)],
+    [new THREE.ConeGeometry(0.07, 0.25, 4).rotateX(Math.PI / 2), '#ffb300', M.t(0, 0, 0.8)],
+  ]);
+}
+
+/** Flapping seagulls circling over an area (one instanced draw call, animated on the kit clock). */
+export function seagulls(k: Kit, count: number, area: { x0: number; x1: number; z0: number; z1: number; y0: number; y1: number }, seed = 808): void {
+  if (count <= 0) return;
+  const rng = new Rng(seed);
+  const mat = k.bag.add(new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.8 }));
+  const im = new THREE.InstancedMesh(k.bag.add(seagullGeo()), mat, count);
+  im.frustumCulled = false;
+  im.castShadow = false;
+  im.name = 'seagulls';
+  const gd = Array.from({ length: count }, () => ({
+    cx: rng.range(area.x0, area.x1), cz: rng.range(area.z0, area.z1), r: rng.range(12, 40), h: rng.range(area.y0, area.y1),
+    w: rng.range(0.25, 0.5) * (rng.chance(0.5) ? 1 : -1), ph: rng.next() * 6,
+  }));
+  k.group.add(im);
+  k.updaters.push((_dt, t) => {
+    gd.forEach((g, i) => {
+      const a = t * g.w + g.ph;
+      const flap = 1 + Math.sin(t * 9 + g.ph * 3) * 0.7;
+      setInstance(im, i, g.cx + Math.cos(a) * g.r, g.h + Math.sin(t * 0.7 + g.ph) * 2, g.cz + Math.sin(a) * g.r, 0, -a + (g.w > 0 ? Math.PI : 0), -Math.sign(g.w) * 0.35, 1.6, 1.6 * flap, 1.6);
+    });
+    im.instanceMatrix.needsUpdate = true;
+  });
+}
+
+/* ================================================================== lakefront */
+
+/**
+ * Harbor lighthouse (Montrose-style) at the end of a stone breakwater: white tower with a red band,
+ * red lantern roof, glowing lamp and a slowly sweeping beam. `len` = breakwater length toward +Z.
+ */
+export function lighthouse(k: Kit, x: number, y: number, z: number, rot = 0, s = 1, len = 0): void {
+  const b = M.trs(x, y, z, 0, rot, 0, s);
+  if (len > 0) {
+    k.solid.push([new THREE.BoxGeometry(7, 2.6, len), '#bdb6a6', L(b, M.t(0, -0.6, -len / 2))]);
+    for (let i = 0; i < len / 6; i++) k.solid.push([new THREE.DodecahedronGeometry(1.6, 0), i % 2 ? '#9d978a' : '#aaa496', L(b, M.trs(i % 2 ? 3.6 : -3.6, -0.8, -3 - i * 6, i, i * 0.7, 0))]);
+  }
+  k.solid.push([new THREE.CylinderGeometry(3.2, 3.6, 2.2, 8), '#d7d0c0', L(b, M.t(0, 0.9, 0))]);
+  k.solid.push([new THREE.CylinderGeometry(1.45, 2.1, 15, 16), '#f6f5ef', L(b, M.t(0, 9.5, 0))]);
+  k.solid.push([new THREE.CylinderGeometry(1.7, 1.8, 2.2, 16), '#c8202f', L(b, M.t(0, 7.5, 0))]);
+  k.solid.push([new THREE.BoxGeometry(0.9, 1.6, 0.2), '#2b3a4a', L(b, M.t(0, 2.6, 2.02))]);
+  k.solid.push([new THREE.CylinderGeometry(2.3, 2.3, 0.35, 16), '#2a2d33', L(b, M.t(0, 17.2, 0))]);
+  k.solid.push([new THREE.TorusGeometry(2.2, 0.06, 4, 20).rotateX(Math.PI / 2), '#2a2d33', L(b, M.t(0, 18.1, 0))]);
+  k.glow.push([new THREE.CylinderGeometry(1.15, 1.15, 1.9, 12), '#fff1a8', L(b, M.t(0, 18.4, 0))]);
+  for (let i = 0; i < 6; i++) beam(k.solid, [Math.cos(i) * 1.18, 17.4, Math.sin(i) * 1.18], [Math.cos(i) * 1.18, 19.4, Math.sin(i) * 1.18], 0.12, '#2a2d33', b);
+  k.solid.push([new THREE.ConeGeometry(1.75, 1.6, 16), '#c8202f', L(b, M.t(0, 20.2, 0))]);
+  k.solid.push([new THREE.SphereGeometry(0.3, 8, 6), '#2a2d33', L(b, M.t(0, 21.1, 0))]);
+  // sweeping beam (additive, faint by day, strong once the scene gets dark)
+  const beamGeo = k.bag.add(mergeGeometries([
+    new THREE.ConeGeometry(5, 70, 12, 1, true).rotateZ(Math.PI / 2).translate(35, 0, 0),
+    new THREE.ConeGeometry(5, 70, 12, 1, true).rotateZ(-Math.PI / 2).translate(-35, 0, 0),
+  ])!);
+  const beamMat = k.bag.add(new THREE.MeshBasicMaterial({ color: '#fff3c0', transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+  const bm = new THREE.Mesh(beamGeo, beamMat);
+  bm.name = 'lighthouseBeam';
+  bm.position.set(x, y + 18.4 * s, z);
+  bm.scale.setScalar(s);
+  k.group.add(bm);
+  k.updaters.push((_dt, t) => {
+    bm.rotation.y = t * 0.9;
+    const tod = timeOfDay(k.group);
+    bm.visible = tod !== 'day';
+    beamMat.opacity = tod === 'night' ? 0.4 : 0.2;
+  });
+}
+
+/**
+ * Chicago Park District-style wooden sign (dark brown board, cream routed letters, green tree
+ * roundel) on two posts. Faces +Z. `w` = board width in meters.
+ */
+export function parkDistrictSign(k: Kit, x: number, y: number, z: number, rot: number, lines: [string, string], w = 9): void {
+  const b = M.trs(x, y, z, 0, rot, 0);
+  const h = w * 0.36;
+  const r = k.paint.draw(512, 184, (g, cw, ch) => {
+    g.fillStyle = '#4a2f1b';
+    g.fillRect(0, 0, cw, ch);
+    g.strokeStyle = '#e9dcb8';
+    g.lineWidth = 6;
+    g.strokeRect(8, 8, cw - 16, ch - 16);
+    // tree roundel
+    g.fillStyle = '#2d7a3a';
+    g.beginPath();
+    g.arc(70, ch / 2, 46, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#e9dcb8';
+    g.beginPath();
+    g.moveTo(70, ch / 2 - 34);
+    g.lineTo(98, ch / 2 + 12);
+    g.lineTo(42, ch / 2 + 12);
+    g.closePath();
+    g.fill();
+    g.fillRect(66, ch / 2 + 10, 8, 20);
+    g.save();
+    g.translate(128, 6);
+    drawText(g, lines[0], cw - 146, ch * 0.6, { fg: '#f4e7c2', font: '900 $px Georgia, "Times New Roman", serif' });
+    g.translate(0, ch * 0.56);
+    drawText(g, lines[1], cw - 146, ch * 0.3, { fg: '#ffd23f', font: '700 $px Georgia, "Times New Roman", serif' });
+    g.restore();
+  }, `cpd|${lines.join('|')}`);
+  k.paint.quad(r, w, h, L(b, M.t(0, 2.2 + h / 2, 0.16)));
+  k.paint.quad(r, w, h, L(b, M.trs(0, 2.2 + h / 2, -0.16, 0, Math.PI, 0)));
+  k.solid.push([new THREE.BoxGeometry(w + 0.4, h + 0.4, 0.28), '#3a2414', L(b, M.t(0, 2.2 + h / 2, 0))]);
+  for (const px of [-w / 2 + 0.6, w / 2 - 0.6]) k.solid.push([new THREE.BoxGeometry(0.4, 2.4 + h, 0.4), '#3a2414', L(b, M.t(px, (2.4 + h) / 2, 0))]);
+}
+
+/* ================================================================== dogs of many breeds */
+
+export type DogBreed = 'lab' | 'dachshund' | 'doodle' | 'husky' | 'corgi';
+
+/**
+ * Tag a part for the dog shader: code 2/3 = leg pairs (swing), 4 = tail (wag); uv.y = 0 at the
+ * pivot-far end (paw / tail base) to 1, len = part length in meters.
+ */
+function dogPart(geo: THREE.BufferGeometry, code: number, len: number, tConst?: number): THREE.BufferGeometry {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox!;
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    uv[i * 2] = code + Math.min(0.099, len * 0.1);
+    uv[i * 2 + 1] = tConst ?? (pos.getY(i) - bb.min.y) / Math.max(1e-4, bb.max.y - bb.min.y);
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return geo;
+}
+
+/** Cartoon dog of a breed: +Z forward, paws at y = 0, ~1.8 m tall; pure-white parts take the instance color. */
+export function dogGeo(breed: DogBreed): THREE.BufferGeometry {
+  const W = '#ffffff';
+  const parts: P = [];
+  const leg = (x: number, z: number, len: number, r: number, code: number, col = W) => parts.push([dogPart(new THREE.CylinderGeometry(r, r * 0.85, len, 6), code, len), col, M.t(x, len / 2, z)]);
+  const eyes = (y: number, z: number, dx = 0.18) => {
+    parts.push([new THREE.SphereGeometry(0.075, 6, 4), '#111', M.t(dx, y, z)]);
+    parts.push([new THREE.SphereGeometry(0.075, 6, 4), '#111', M.t(-dx, y, z)]);
+  };
+  const collar = (y: number, z: number, r: number, col = '#e8443a') => parts.push([new THREE.TorusGeometry(r, 0.07, 5, 12).rotateX(Math.PI / 2), col, M.trs(0, y, z, 0.5, 0, 0)]);
+  if (breed === 'lab' || breed === 'husky') {
+    const husky = breed === 'husky';
+    parts.push([new THREE.CapsuleGeometry(0.46, 1.15, 4, 8).rotateX(Math.PI / 2), W, M.t(0, 1.05, 0)]);
+    if (husky) parts.push([new THREE.CapsuleGeometry(0.36, 0.9, 3, 8).rotateX(Math.PI / 2), '#f4f3ee', M.t(0, 0.86, 0.1)]);
+    parts.push([new THREE.SphereGeometry(0.44, 10, 8), W, M.t(0, 1.62, 0.95)]);
+    parts.push([new THREE.CapsuleGeometry(0.2, 0.3, 3, 8).rotateX(Math.PI / 2), husky ? '#f4f3ee' : W, M.t(0, 1.48, 1.32)]);
+    parts.push([new THREE.SphereGeometry(0.11, 6, 4), '#1a1a1a', M.t(0, 1.55, 1.6)]);
+    eyes(1.74, 1.3);
+    if (husky) {
+      for (const sx of [-1, 1]) parts.push([new THREE.ConeGeometry(0.16, 0.42, 4), W, M.trs(sx * 0.25, 2.08, 0.88, 0, 0, sx * -0.2)]);
+      parts.push([dogPart(new THREE.TorusGeometry(0.3, 0.12, 5, 10, Math.PI * 1.3), 4, 0.6, 1), W, M.trs(0, 1.55, -0.95, 0, Math.PI / 2, 0)]);
+    } else {
+      for (const sx of [-1, 1]) parts.push([new THREE.SphereGeometry(0.26, 8, 6), W, M.trs(sx * 0.42, 1.62, 0.85, 0, 0, sx * 0.5, 0.55, 1.2, 0.5)]);
+      parts.push([dogPart(new THREE.CylinderGeometry(0.05, 0.11, 0.8, 6), 4, 0.8), W, M.trs(0, 1.4, -1.1, -0.9, 0, 0)]);
+    }
+    collar(1.4, 0.72, 0.42, husky ? '#2f7de1' : '#e8443a');
+    leg(0.27, 0.55, 0.8, 0.14, 2); leg(-0.27, -0.55, 0.8, 0.14, 2);
+    leg(-0.27, 0.55, 0.8, 0.14, 3); leg(0.27, -0.55, 0.8, 0.14, 3);
+  } else if (breed === 'dachshund' || breed === 'corgi') {
+    const corgi = breed === 'corgi';
+    parts.push([new THREE.CapsuleGeometry(corgi ? 0.42 : 0.33, corgi ? 1.1 : 1.6, 4, 8).rotateX(Math.PI / 2), W, M.t(0, corgi ? 0.72 : 0.62, 0)]);
+    if (corgi) parts.push([new THREE.SphereGeometry(0.36, 8, 6), '#faf5ea', M.t(0, 0.62, 0.62)]);
+    const hz = corgi ? 0.95 : 1.2, hy = corgi ? 1.18 : 1.0;
+    parts.push([new THREE.SphereGeometry(corgi ? 0.38 : 0.3, 10, 8), W, M.t(0, hy, hz)]);
+    parts.push([new THREE.CapsuleGeometry(corgi ? 0.16 : 0.13, corgi ? 0.25 : 0.42, 3, 8).rotateX(Math.PI / 2), corgi ? '#faf5ea' : W, M.t(0, hy - 0.1, hz + (corgi ? 0.32 : 0.4))]);
+    parts.push([new THREE.SphereGeometry(0.08, 6, 4), '#1a1a1a', M.t(0, hy - 0.06, hz + (corgi ? 0.55 : 0.72))]);
+    eyes(hy + 0.1, hz + 0.24, 0.14);
+    if (corgi) for (const sx of [-1, 1]) parts.push([new THREE.ConeGeometry(0.17, 0.5, 4), W, M.trs(sx * 0.22, hy + 0.45, hz - 0.05, 0, 0, sx * -0.3)]);
+    else for (const sx of [-1, 1]) parts.push([new THREE.SphereGeometry(0.2, 8, 6), '#5a3418', M.trs(sx * 0.3, hy - 0.12, hz - 0.05, 0, 0, sx * 0.2, 0.45, 1.3, 0.7)]);
+    if (!corgi) parts.push([dogPart(new THREE.CylinderGeometry(0.03, 0.08, 0.7, 5), 4, 0.7), W, M.trs(0, 0.75, -1.2, -1.1, 0, 0)]);
+    collar(hy - 0.3, hz - 0.3, corgi ? 0.34 : 0.27, corgi ? '#ffd23f' : '#3ccf6e');
+    const ll = corgi ? 0.4 : 0.34, lz = corgi ? 0.5 : 0.7;
+    leg(0.2, lz, ll, 0.11, 2); leg(-0.2, -lz, ll, 0.11, 2);
+    leg(-0.2, lz, ll, 0.11, 3); leg(0.2, -lz, ll, 0.11, 3);
+  } else {
+    // doodle: all puffs (Lupin's cousins)
+    for (let i = 0; i < 4; i++) parts.push([new THREE.IcosahedronGeometry(0.45, 1), W, M.t(0, 1.05 + (i % 2) * 0.06, -0.55 + i * 0.36)]);
+    parts.push([new THREE.IcosahedronGeometry(0.5, 1), W, M.t(0, 1.68, 0.9)]);
+    parts.push([new THREE.IcosahedronGeometry(0.3, 1), W, M.t(0, 2.1, 0.8)]);
+    for (const sx of [-1, 1]) parts.push([new THREE.IcosahedronGeometry(0.26, 1), W, M.trs(sx * 0.48, 1.5, 0.82, 0, 0, 0, 0.8, 1.4, 0.8)]);
+    parts.push([new THREE.SphereGeometry(0.24, 8, 6), '#f7efe0', M.t(0, 1.55, 1.3)]);
+    parts.push([new THREE.SphereGeometry(0.1, 6, 4), '#1a1a1a', M.t(0, 1.62, 1.52)]);
+    parts.push([new THREE.SphereGeometry(0.1, 6, 4), '#ff7aa8', M.trs(0, 1.38, 1.4, 0, 0, 0, 0.9, 0.5, 1)]);
+    eyes(1.82, 1.3, 0.2);
+    parts.push([dogPart(new THREE.IcosahedronGeometry(0.26, 1), 4, 0.6, 1), W, M.t(0, 1.5, -1.05)]);
+    collar(1.38, 0.72, 0.42, '#1f3f8f');
+    for (const [x, z, c] of [[0.27, 0.55, 2], [-0.27, -0.55, 2], [-0.27, 0.55, 3], [0.27, -0.55, 3]]) {
+      leg(x, z, 0.8, 0.17, c);
+      parts.push([dogPart(new THREE.IcosahedronGeometry(0.22, 0), c, 0.8, 0), W, M.t(x, 0.16, z)]);
+    }
+  }
+  return mergeColored(parts);
+}
+
+/**
+ * Material for dogGeo: pure-white vertices take the instance color, legs trot and tails wag
+ * (phase from the instance position, so every dog moves differently). Animated on `time`.
+ */
+export function dogMat(bag: Bag, time: { value: number }): THREE.MeshStandardMaterial {
+  const m = bag.add(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = time;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime;')
+      .replace(
+        '#include <color_vertex>',
+        `vColor = vec3(1.0);
+        #ifdef USE_COLOR
+        vColor *= color;
+        #endif
+        #ifdef USE_INSTANCING_COLOR
+        { float tm = step(2.97, color.r + color.g + color.b); vColor.xyz *= mix(vec3(1.0), instanceColor.xyz, tm); }
+        #endif`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        {
+          float ph = 0.0;
+          #ifdef USE_INSTANCING
+          ph = instanceMatrix[3].x * 1.37 + instanceMatrix[3].z * 0.71;
+          #endif
+          float code = floor(uv.x);
+          float len = fract(uv.x) * 10.0;
+          if (code > 1.5 && code < 3.5) {
+            float sw = sin(uTime * 13.0 + ph + (code - 2.0) * 3.14159) * 0.6;
+            transformed.z += sw * (1.0 - uv.y) * len;
+            transformed.y += max(0.0, -sw) * (1.0 - uv.y) * len * 0.25;
+          } else if (code > 3.5 && code < 4.5) {
+            transformed.x += sin(uTime * 22.0 + ph) * 0.55 * uv.y * len;
+          }
+        }`,
+      );
+  };
+  m.customProgramCacheKey = () => 'dogmat';
+  return m;
+}
+
+/* ================================================================== Chicago food (giant, for the kitchen) */
+
+/**
+ * Deep-dish pizza in a black pan with one slice being lifted out on a loop, stretching strings of
+ * mozzarella (cheese pull) and chunky tomato on top. Unit radius ~1 at s = 1.
+ */
+export function deepDishPizza(k: Kit, x: number, y: number, z: number, rot = 0, s = 1, rng = new Rng(312), tilt = 0): void {
+  let b = M.trs(x, y, z, 0, rot, 0, s);
+  if (tilt) {
+    // propped up on a wooden pizza stand so its top faces +Z (lets low cameras see the pie)
+    const lift = Math.sin(tilt) * 1.25 + 0.15;
+    k.solid.push([new THREE.CylinderGeometry(0.08, 0.1, lift * 2 + 0.3, 6), '#7a4f2a', L(b, M.t(0, 0.15, -0.9))]);
+    k.solid.push([new THREE.CylinderGeometry(0.08, 0.1, 0.4, 6), '#7a4f2a', L(b, M.t(-0.8, 0.2, 0.7))]);
+    k.solid.push([new THREE.CylinderGeometry(0.08, 0.1, 0.4, 6), '#7a4f2a', L(b, M.t(0.8, 0.2, 0.7))]);
+    b = b.multiply(M.trs(0, lift, 0, tilt, 0, 0));
+    k.solid.push([new THREE.CylinderGeometry(1.25, 1.25, 0.08, 32), '#b27a43', L(b, M.t(0, -0.04, 0))]);
+  }
+  const CUT = Math.PI / 4;
+  const crust = '#d99a4e', cheese = '#ffd65c', sauce = '#c22d1b';
+  // pan
+  k.gloss.push([new THREE.CylinderGeometry(1.1, 1.06, 0.62, 40, 1, true), '#232327', L(b, M.t(0, 0.31, 0))]);
+  k.gloss.push([new THREE.CylinderGeometry(1.06, 1.06, 0.05, 40), '#232327', L(b, M.t(0, 0.025, 0))]);
+  k.gloss.push([new THREE.TorusGeometry(1.1, 0.035, 5, 40).rotateX(Math.PI / 2), '#2e2e33', L(b, M.t(0, 0.62, 0))]);
+  // pie minus one slice: crust wall + lip, cheese body, sauce top
+  k.solid.push([new THREE.CylinderGeometry(1.05, 1.03, 0.66, 40, 1, true, CUT, Math.PI * 2 - CUT), crust, L(b, M.t(0, 0.33, 0))]);
+  k.solid.push([new THREE.TorusGeometry(1.0, 0.07, 6, 40, Math.PI * 2 - CUT).rotateX(Math.PI / 2).rotateY(-Math.PI / 2), crust, L(b, M.t(0, 0.66, 0))]);
+  k.solid.push([new THREE.CylinderGeometry(0.96, 0.96, 0.5, 40, 1, false, CUT, Math.PI * 2 - CUT), sauce, L(b, M.t(0, 0.31, 0))]);
+  const face = (parts: P, th: number, base: THREE.Matrix4) => {
+    const d = (yy: number, hh: number, col: string) => parts.push([new THREE.BoxGeometry(1.0, hh, 0.012), col, L(base, M.trs(Math.sin(th) * 0.5, yy, Math.cos(th) * 0.5, 0, th - Math.PI / 2, 0))]);
+    d(0.06, 0.12, crust);
+    d(0.3, 0.36, cheese);
+    d(0.52, 0.1, sauce);
+    d(0.62, 0.08, crust);
+  };
+  face(k.solid, 0.002, b);
+  face(k.solid, CUT - 0.002, b);
+  // chunky tomato + parmesan + oregano on top
+  for (let i = 0; i < 46; i++) {
+    const a = CUT + rng.next() * (Math.PI * 2 - CUT - 0.1), r = Math.sqrt(rng.next()) * 0.85;
+    k.solid.push([new THREE.IcosahedronGeometry(rng.range(0.05, 0.1), 0), rng.pick(['#a8180f', '#d6402a', '#b92a17']), L(b, M.trs(Math.sin(a) * r, 0.57, Math.cos(a) * r, rng.next() * 3, rng.next() * 3, 0, 1, 0.6, 1))]);
+  }
+  for (let i = 0; i < 60; i++) {
+    const a = CUT + rng.next() * (Math.PI * 2 - CUT - 0.1), r = Math.sqrt(rng.next()) * 0.9;
+    k.solid.push([new THREE.BoxGeometry(0.03, 0.01, 0.03), i % 3 ? '#f4eedc' : '#3f7a2a', L(b, M.t(Math.sin(a) * r, 0.565, Math.cos(a) * r))]);
+  }
+  // the lifted slice (own mesh so it can move) + spatula
+  const sp: P = [];
+  const id = new THREE.Matrix4();
+  sp.push([new THREE.CylinderGeometry(1.0, 1.0, 0.58, 10, 1, false, 0.03, CUT - 0.06), cheese, M.t(0, 0.31, 0)]);
+  sp.push([new THREE.CylinderGeometry(0.97, 0.97, 0.1, 10, 1, false, 0.03, CUT - 0.06), sauce, M.t(0, 0.57, 0)]);
+  sp.push([new THREE.CylinderGeometry(1.04, 1.02, 0.66, 10, 1, true, 0.03, CUT - 0.06), crust, M.t(0, 0.33, 0)]);
+  face(sp, 0.03, M.t(0, 0, 0));
+  face(sp, CUT - 0.03, id);
+  for (let i = 0; i < 6; i++) sp.push([new THREE.IcosahedronGeometry(0.08, 0), '#b92a17', M.t(Math.sin(0.2 + i * 0.08) * (0.3 + (i % 3) * 0.2), 0.62, Math.cos(0.2 + i * 0.08) * (0.3 + (i % 3) * 0.2))]);
+  sp.push([new THREE.BoxGeometry(0.5, 0.02, 0.62), '#c8ccd2', M.trs(Math.sin(CUT / 2) * 0.5, -0.01, Math.cos(CUT / 2) * 0.5, 0, CUT / 2, 0)]);
+  const slice = new THREE.Mesh(k.bag.add(mergeColored(sp)), k.solidMat);
+  slice.matrixAutoUpdate = false;
+  slice.castShadow = true;
+  slice.name = 'pizzaSlice';
+  k.group.add(slice);
+  // cheese strings between the pie's cut faces and the slice
+  const anchors: Array<[THREE.Vector3, THREE.Vector3]> = [];
+  for (let i = 0; i < 7; i++) {
+    const side = i % 2 ? CUT - 0.002 : 0.002;
+    const r = 0.25 + (i / 7) * 0.65, yy = 0.35 + (i % 3) * 0.06;
+    const a = new THREE.Vector3(Math.sin(side) * r, yy, Math.cos(side) * r);
+    const sd = i % 2 ? CUT - 0.03 : 0.03;
+    anchors.push([a, new THREE.Vector3(Math.sin(sd) * r, yy, Math.cos(sd) * r)]);
+  }
+  const strandMat = k.bag.add(new THREE.MeshStandardMaterial({ color: '#ffe27a', roughness: 0.5, emissive: '#3a2a00' }));
+  const strands = new THREE.InstancedMesh(k.bag.add(new THREE.CylinderGeometry(1, 1, 1, 5).translate(0, 0.5, 0)), strandMat, anchors.length);
+  strands.frustumCulled = false;
+  strands.name = 'cheesePull';
+  k.group.add(strands);
+  const dir = new THREE.Vector3(Math.sin(CUT / 2), 0, Math.cos(CUT / 2));
+  const sm = new THREE.Matrix4(), tmp = new THREE.Matrix4(), A = new THREE.Vector3(), B = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+  const axis = new THREE.Vector3(dir.z, 0, -dir.x);
+  k.updaters.push((_dt, t) => {
+    const c = (t % 7) / 7;
+    const e = c < 0.35 ? c / 0.35 : c < 0.65 ? 1 : 1 - (c - 0.65) / 0.35;
+    const lift = e * e * (3 - 2 * e);
+    sm.makeTranslation(dir.x * lift * 0.45, lift * 0.85, dir.z * lift * 0.45).multiply(tmp.makeRotationAxis(axis, lift * 0.12));
+    slice.matrix.copy(b).multiply(sm);
+    slice.matrixWorldNeedsUpdate = true;
+    anchors.forEach(([a, sa], i) => {
+      A.copy(a).applyMatrix4(b);
+      B.copy(sa).applyMatrix4(sm).applyMatrix4(b);
+      const d = B.clone().sub(A);
+      const len = Math.max(0.001, d.length());
+      q.setFromUnitVectors(_up, d.normalize());
+      const th = s * Math.max(0.012, 0.06 / Math.sqrt(1 + (len / s) * 4)) * (lift > 0.02 ? 1 : 0.01);
+      tmp.compose(A, q, sc.set(th, len, th));
+      strands.setMatrixAt(i, tmp);
+    });
+    strands.instanceMatrix.needsUpdate = true;
+  });
+}
+
+/**
+ * Italian beef on butcher paper: soaked roll, a pile of thin-sliced beef, hot giardiniera spilling
+ * over and jus dripping (animated drops). Roll ~1 long at s = 1, +X along the roll.
+ */
+export function italianBeef(k: Kit, x: number, y: number, z: number, rot = 0, s = 1, rng = new Rng(4545)): void {
+  const b = M.trs(x, y, z, 0, rot, 0, s);
+  const giard = ['#f28c1c', '#9ccc4a', '#3e9c35', '#d8392b', '#f4f0e0', '#e3c84a'];
+  k.solid.push([new THREE.BoxGeometry(1.7, 0.012, 1.1), '#f2ede0', L(b, M.trs(0, 0.006, 0, 0, 0.12, 0))]);
+  k.solid.push([new THREE.CylinderGeometry(0.42, 0.42, 0.012, 20), '#7b4320', L(b, M.trs(0.15, 0.014, 0.08, 0, 0, 0, 1.3, 1, 0.8))]);
+  // bottom roll (dipped dark) + top roll hinged open
+  k.solid.push([new THREE.CapsuleGeometry(0.17, 0.85, 4, 12).rotateZ(Math.PI / 2), '#a8692c', L(b, M.trs(0, 0.1, 0, 0, 0, 0, 1, 0.55, 1))]);
+  k.solid.push([new THREE.CapsuleGeometry(0.17, 0.85, 4, 12).rotateZ(Math.PI / 2), '#e6b56e', L(b, M.trs(0, 0.33, -0.17, -0.55, 0, 0, 1, 0.5, 1))]);
+  // beef ribbons
+  for (let i = 0; i < 12; i++) {
+    k.solid.push([new THREE.BoxGeometry(0.92, 0.022, 0.26), i % 2 ? '#7a3b22' : '#8f4a2a', L(b, M.trs(rng.range(-0.04, 0.04), 0.17 + i * 0.012, rng.range(-0.04, 0.04), rng.range(-0.25, 0.25), rng.range(-0.15, 0.15), rng.range(-0.08, 0.08)))]);
+  }
+  // giardiniera on top and spilling on the paper
+  for (let i = 0; i < 34; i++) {
+    const top = i < 22;
+    const px = top ? rng.range(-0.42, 0.42) : rng.range(-0.75, 0.75), pz = top ? rng.range(-0.1, 0.12) : rng.range(0.2, 0.5) * (rng.chance(0.5) ? 1 : -1);
+    const py = top ? 0.33 + rng.range(0, 0.06) : 0.03;
+    const sz = rng.range(0.045, 0.08);
+    k.solid.push([i % 4 ? new THREE.BoxGeometry(sz, sz * 0.7, sz * 1.4) : new THREE.CylinderGeometry(sz * 0.7, sz * 0.7, sz * 0.5, 8), rng.pick(giard), L(b, M.trs(px, py, pz, rng.next() * 3, rng.next() * 3, rng.next() * 3))]);
+  }
+  // sport-pepper style hot peppers
+  for (const px of [-0.3, 0.25]) k.solid.push([new THREE.ConeGeometry(0.035, 0.16, 6).rotateZ(Math.PI / 2), '#7cc24a', L(b, M.t(px, 0.4, 0.02))]);
+  // dripping jus
+  const N = 6;
+  const drops = new THREE.InstancedMesh(k.bag.add(new THREE.SphereGeometry(0.035, 6, 4).scale(1, 1.5, 1)), k.bag.add(new THREE.MeshStandardMaterial({ color: '#6b3415', roughness: 0.25, metalness: 0.1 })), N);
+  drops.frustumCulled = false;
+  drops.castShadow = false;
+  drops.name = 'beefDrips';
+  k.group.add(drops);
+  const dd = Array.from({ length: N }, (_, i) => ({ x: -0.4 + i * 0.16, z: i % 2 ? 0.14 : -0.14, ph: rng.next() }));
+  const m = new THREE.Matrix4(), v = new THREE.Vector3();
+  k.updaters.push((_dt, t) => {
+    dd.forEach((d, i) => {
+      const c = (t * 0.6 + d.ph) % 1;
+      const hang = c < 0.5;
+      const yy = hang ? 0.06 - c * 0.04 : Math.max(0.02, 0.04 - (c - 0.5) * (c - 0.5) * 4 * 0.12);
+      v.set(d.x, yy, d.z).applyMatrix4(b);
+      const sq = hang ? 0.6 + c : 1;
+      m.compose(v, new THREE.Quaternion(), new THREE.Vector3(s * sq, s * (hang ? 1.4 : 1), s * sq));
+      drops.setMatrixAt(i, m);
+    });
+    drops.instanceMatrix.needsUpdate = true;
+  });
+}
+
+/**
+ * Chicago-style hot dog "dragged through the garden" in a paper boat: poppy-seed bun, all-beef frank,
+ * yellow mustard, neon-green relish, chopped onions, tomato wedges, a pickle spear, sport peppers and
+ * a dash of celery salt (never ketchup). Bun ~1 long at s = 1, +X along the dog.
+ */
+export function chicagoHotDog(k: Kit, x: number, y: number, z: number, rot = 0, s = 1, rng = new Rng(1893)): void {
+  const b = M.trs(x, y, z, 0, rot, 0, s);
+  // paper boat
+  k.solid.push([new THREE.BoxGeometry(1.3, 0.03, 0.56), '#f6f2e8', L(b, M.t(0, 0.015, 0))]);
+  for (const sz of [-1, 1]) k.solid.push([new THREE.BoxGeometry(1.3, 0.07, 0.02), '#d0121f', L(b, M.trs(0, 0.045, sz * 0.29, sz * 0.5, 0, 0))]);
+  for (const sx of [-1, 1]) k.solid.push([new THREE.BoxGeometry(0.02, 0.07, 0.56), '#f6f2e8', L(b, M.trs(sx * 0.66, 0.045, 0, 0, 0, -sx * 0.5))]);
+  // bun halves + poppy seeds
+  for (const bz of [-0.12, 0.12]) {
+    k.solid.push([new THREE.CapsuleGeometry(0.11, 0.86, 4, 10).rotateZ(Math.PI / 2), '#e4b46e', L(b, M.trs(0, 0.13, bz, bz * 2.2, 0, 0, 1, 0.9, 1))]);
+    for (let i = 0; i < 26; i++) k.solid.push([new THREE.BoxGeometry(0.012, 0.012, 0.012), '#22201e', L(b, M.t(rng.range(-0.48, 0.48), 0.23 + rng.range(-0.01, 0.01), bz + Math.sign(bz) * rng.range(0, 0.07)))]);
+  }
+  // frank
+  k.solid.push([new THREE.CapsuleGeometry(0.075, 0.98, 4, 10).rotateZ(Math.PI / 2), '#b5432a', L(b, M.t(0, 0.17, 0))]);
+  // yellow mustard zigzag
+  for (let i = 0; i < 10; i++) beam(k.solid, [-0.45 + i * 0.09, 0.25, (i % 2 ? 1 : -1) * 0.04], [-0.36 + i * 0.09, 0.25, (i % 2 ? -1 : 1) * 0.04], 0.022, '#ffd400', b);
+  // neon-green relish
+  for (let i = 0; i < 18; i++) k.solid.push([new THREE.BoxGeometry(0.035, 0.025, 0.035), '#3ef02a', L(b, M.trs(rng.range(-0.42, 0.42), 0.255, rng.range(-0.05, 0.05), 0, rng.next() * 3, 0))]);
+  // chopped onions
+  for (let i = 0; i < 14; i++) k.solid.push([new THREE.BoxGeometry(0.025, 0.02, 0.025), '#fbf8ee', L(b, M.trs(rng.range(-0.42, 0.42), 0.262, rng.range(-0.05, 0.05), 0, rng.next() * 3, 0))]);
+  // tomato wedges (one side), pickle spear (other side), sport peppers
+  for (const tx of [-0.28, 0, 0.28]) k.solid.push([new THREE.CylinderGeometry(0.075, 0.075, 0.06, 10, 1, false, 0, Math.PI).rotateZ(Math.PI / 2), '#e8392b', L(b, M.trs(tx, 0.235, 0.085, 0, 0.25, 0))]);
+  k.solid.push([new THREE.CapsuleGeometry(0.04, 0.8, 3, 8).rotateZ(Math.PI / 2), '#4f8f2a', L(b, M.trs(0, 0.22, -0.1, 0, 0, 0, 1, 0.7, 1))]);
+  for (const px of [-0.35, -0.05, 0.3]) k.solid.push([new THREE.ConeGeometry(0.025, 0.11, 6).rotateZ(Math.PI / 2), '#8cc63f', L(b, M.trs(px, 0.28, rng.range(-0.03, 0.03), 0, rng.range(-0.4, 0.4), 0))]);
+  // celery salt
+  for (let i = 0; i < 30; i++) k.solid.push([new THREE.BoxGeometry(0.008, 0.008, 0.008), i % 2 ? '#8f9a6a' : '#cfc7a6', L(b, M.t(rng.range(-0.45, 0.45), 0.27, rng.range(-0.08, 0.08)))]);
+}
+
+/**
+ * Chicago-mix popcorn tin (cheese + caramel) with a skyline label wrapped round it and the lid
+ * leaning against it. Radius ~1, height ~1.25 at s = 1.
+ */
+export function popcornTin(k: Kit, x: number, y: number, z: number, rot = 0, s = 1, rng = new Rng(606)): void {
+  const b = M.trs(x, y, z, 0, rot, 0, s);
+  const label = k.paint.draw(1024, 256, (g, w, h) => {
+    const grd = g.createLinearGradient(0, 0, 0, h);
+    grd.addColorStop(0, '#1d4f9c');
+    grd.addColorStop(1, '#0d2d63');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, w, h);
+    const r = new Rng(77);
+    for (let rep = 0; rep < 2; rep++) {
+      drawChicagoSkyline(g, rep * (w / 2), h * 0.98, w / 2, h * 0.5, r, { tones: ['#2b62b8', '#3a74cc', '#2457a6'], dark: '#0a1d42', glass: '#4f8fe0', windows: 'rgba(255,230,140,0.55)' });
+      drawText(g, rep ? 'CHEESE + CARAMEL' : 'CHICAGO MIX', w / 2, h * 0.42, { fg: '#ffd23f', stroke: '#0a1d42' });
+      g.translate(w / 2, 0);
+    }
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = '#ffd23f';
+    g.fillRect(0, 0, w, 6);
+    g.fillRect(0, h - 6, w, 6);
+  }, 'popcornTinLabel');
+  k.paint.mapped(label, new THREE.CylinderGeometry(1, 1, 1.25, 32, 1, true), L(b, M.t(0, 0.625, 0)));
+  k.gloss.push([new THREE.CylinderGeometry(1, 1, 0.04, 32), '#c9ced6', L(b, M.t(0, 0.02, 0))]);
+  k.gloss.push([new THREE.TorusGeometry(1.0, 0.03, 4, 32).rotateX(Math.PI / 2), '#e3c35a', L(b, M.t(0, 1.25, 0))]);
+  // the lid leaning against the tin
+  const lidN = new THREE.Vector3(Math.sin(1.3), Math.cos(1.3), 0);
+  const lidC = new THREE.Vector3(1.32, 1.02, 0.25);
+  k.gloss.push([new THREE.CylinderGeometry(1.04, 1.04, 0.12, 32), '#1d4f9c', L(b, M.trs(lidC.x, lidC.y, lidC.z, 0, 0, -1.3))]);
+  const lidTop = k.paint.draw(256, 256, (g, w, h) => {
+    g.fillStyle = '#1d4f9c';
+    g.fillRect(0, 0, w, h);
+    drawChicagoFlag(g, w * 0.12, h * 0.3, w * 0.76, h * 0.4);
+  }, 'popcornLid');
+  const lidQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), lidN).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2));
+  k.paint.mapped(lidTop, new THREE.CircleGeometry(0.98, 28), L(b, new THREE.Matrix4().compose(lidC.clone().addScaledVector(lidN, 0.065), lidQ, new THREE.Vector3(1, 1, 1))));
+  // heap: cheese half and caramel half
+  for (let i = 0; i < 90; i++) {
+    const a = rng.next() * Math.PI * 2, r = Math.sqrt(rng.next()) * 0.92;
+    const px = Math.cos(a) * r, pz = Math.sin(a) * r;
+    const py = 1.18 + (1 - r) * 0.35 + rng.range(-0.05, 0.08);
+    const col = px < 0 ? rng.pick(['#f29a1e', '#f7b23a', '#e98a12']) : rng.pick(['#c98a2e', '#b8761f', '#d9a24a']);
+    k.solid.push([new THREE.IcosahedronGeometry(rng.range(0.08, 0.12), 0), col, L(b, M.trs(px, py, pz, rng.next() * 3, rng.next() * 3, 0))]);
+  }
+  // a few kernels spilled
+  for (let i = 0; i < 10; i++) k.solid.push([new THREE.IcosahedronGeometry(0.09, 0), i % 2 ? '#f29a1e' : '#c98a2e', L(b, M.t(rng.range(-1.6, 1.6), 0.08, rng.range(1.1, 1.8)))]);
+}
+
+/**
+ * Dogs of mixed breeds running laps / figure-eights around the given spots (one instanced draw call
+ * per breed, trotting legs and wagging tails in the shader). `height` = ground height lookup.
+ */
+export function runningDogs(
+  k: Kit, height: (x: number, z: number) => number, spots: Array<{ x: number; z: number }>,
+  o: { breeds?: DogBreed[]; scale?: [number, number]; r?: [number, number]; seed?: number } = {},
+): void {
+  if (!spots.length) return;
+  const rng = new Rng(o.seed ?? 2024);
+  const breeds = o.breeds ?? ['lab', 'doodle', 'dachshund', 'husky', 'corgi'];
+  const coat: Record<DogBreed, string[]> = {
+    lab: ['#e8c27a', '#2a2a2a', '#6b4424'], doodle: ['#f3e3c3', '#d9a066', '#fffaf0'], dachshund: ['#8a4a22', '#3a2416'],
+    husky: ['#8a8f99', '#4a4f57', '#c9ccd2'], corgi: ['#e08a3c', '#c96f2a'],
+  };
+  const [s0, s1] = o.scale ?? [0.6, 0.8];
+  const [r0, r1] = o.r ?? [3, 7];
+  const dogs = spots.map((p, i) => ({ breed: breeds[i % breeds.length], x: p.x, z: p.z, r: rng.range(r0, r1), w: rng.range(0.7, 1.3) * (rng.chance(0.5) ? 1 : -1), ph: rng.next() * 6, s: rng.range(s0, s1), eight: rng.chance(0.4) }));
+  const mat = dogMat(k.bag, k.time);
+  const sets: Array<{ im: THREE.InstancedMesh; list: typeof dogs }> = [];
+  for (const br of breeds) {
+    const list = dogs.filter((d) => d.breed === br);
+    if (!list.length) continue;
+    const im = new THREE.InstancedMesh(k.bag.add(dogGeo(br)), mat, list.length);
+    list.forEach((_, i) => im.setColorAt(i, new THREE.Color(rng.pick(coat[br]))));
+    im.frustumCulled = false;
+    im.castShadow = k.q === 'high';
+    im.name = `runningDogs-${br}`;
+    k.group.add(im);
+    sets.push({ im, list });
+  }
+  k.updaters.push((_dt, t) => {
+    for (const { im, list } of sets) {
+      list.forEach((d, i) => {
+        const a = t * d.w + d.ph;
+        const x = d.x + Math.cos(a) * d.r, z = d.z + (d.eight ? Math.sin(2 * a) * 0.5 : Math.sin(a)) * d.r;
+        const dx = -Math.sin(a) * d.w, dz = (d.eight ? Math.cos(2 * a) : Math.cos(a)) * d.w;
+        setInstance(im, i, x, height(x, z) + Math.abs(Math.sin(t * 9 + d.ph)) * 0.2, z, 0, Math.atan2(dx, dz), 0, d.s);
+      });
+      im.instanceMatrix.needsUpdate = true;
+    }
+  });
+}
+
+/** Diamond kites (Chicago colors on the tails) bobbing on the lake breeze above the given spots. */
+export function kites(k: Kit, spots: Array<{ x: number; z: number; h: number }>, seed = 99): void {
+  if (!spots.length) return;
+  const rng = new Rng(seed);
+  const geo = k.bag.add(mergeColored([
+    [new THREE.OctahedronGeometry(1.6, 0), '#ffffff', M.trs(0, 0, 0, 0, 0, 0, 1, 1.4, 0.08)],
+    [new THREE.BoxGeometry(0.05, 6, 0.05), '#f4f4f4', M.t(0, -4.2, 0)],
+    ...[0, 1, 2, 3].map((i) => [new THREE.BoxGeometry(0.5, 0.25, 0.05), i % 2 ? CHI_RED : CHI_BLUE, M.trs(0, -2.6 - i * 1.2, 0, 0, 0, 0.5)] as [THREE.BufferGeometry, string, THREE.Matrix4]),
+  ]));
+  const im = new THREE.InstancedMesh(geo, k.tintMat, spots.length);
+  const cols = [CHI_RED, CHI_BLUE, '#ffd23f', '#3ccf6e', '#ff8a3d'];
+  const kd = spots.map((s) => ({ ...s, ph: rng.next() * 6 }));
+  kd.forEach((_, i) => im.setColorAt(i, new THREE.Color(cols[i % cols.length])));
+  im.frustumCulled = false;
+  im.castShadow = false;
+  im.name = 'kites';
+  k.group.add(im);
+  k.updaters.push((_dt, t) => {
+    kd.forEach((q, i) => setInstance(im, i, q.x + Math.sin(t * 0.7 + q.ph) * 4, q.h + Math.sin(t * 1.1 + q.ph) * 2, q.z + Math.cos(t * 0.5 + q.ph) * 5, 0, Math.PI / 2 + Math.sin(t * 0.9 + q.ph) * 0.3, Math.sin(t * 1.7 + q.ph) * 0.35, 1));
+    im.instanceMatrix.needsUpdate = true;
+  });
+}
+
+/** Glass jar of hot giardiniera (veg mosaic under the glass, CHICAGO STYLE label). Radius ~1, height ~2.2 at s = 1. */
+export function giardinieraJar(k: Kit, x: number, y: number, z: number, rot = 0, s = 1): void {
+  const b = M.trs(x, y, z, 0, rot, 0, s);
+  const side = k.paint.draw(1024, 256, (g, w, h) => {
+    const r = new Rng(19);
+    g.fillStyle = '#c9c46a';
+    g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 520; i++) {
+      g.fillStyle = r.pick(['#f28c1c', '#9ccc4a', '#3e9c35', '#d8392b', '#f4f0e0', '#e3c84a', '#6aa23a']);
+      g.save();
+      g.translate(r.next() * w, r.next() * h);
+      g.rotate(r.next() * 3);
+      g.fillRect(-r.range(4, 12), -r.range(3, 7), r.range(8, 24), r.range(6, 14));
+      g.restore();
+    }
+    g.fillStyle = 'rgba(255,255,255,0.18)';
+    g.fillRect(w * 0.05, 0, w * 0.04, h);
+    for (const lx of [w * 0.1, w * 0.6]) {
+      g.fillStyle = '#fff8e6';
+      g.fillRect(lx, h * 0.3, w * 0.3, h * 0.46);
+      g.strokeStyle = CHI_RED;
+      g.lineWidth = 6;
+      g.strokeRect(lx + 6, h * 0.3 + 6, w * 0.3 - 12, h * 0.46 - 12);
+      g.save();
+      g.translate(lx, h * 0.31);
+      drawText(g, 'HOT\nGIARDINIERA', w * 0.3, h * 0.3, { fg: '#1f6b3a' });
+      g.translate(0, h * 0.29);
+      drawText(g, 'CHICAGO STYLE', w * 0.3, h * 0.12, { fg: CHI_RED });
+      g.restore();
+    }
+  }, 'giardJar');
+  k.paint.mapped(side, new THREE.CylinderGeometry(1, 1, 2, 32, 1, true), L(b, M.t(0, 1, 0)));
+  k.solid.push([new THREE.CylinderGeometry(1, 1, 0.04, 32), '#b9b46a', L(b, M.t(0, 0.02, 0))]);
+  k.gloss.push([new THREE.CylinderGeometry(0.86, 0.9, 0.3, 32), '#d9b23a', L(b, M.t(0, 2.15, 0))]);
+  k.gloss.push([new THREE.CylinderGeometry(0.92, 0.92, 0.1, 32), '#e6c24a', L(b, M.t(0, 2.0, 0))]);
+}
+
+/** "Greetings from Chicago" postcard-style poster: skyline over the lake, sailboats, flag. */
+export function drawGreetingsPoster(g: CanvasRenderingContext2D, w: number, h: number): void {
+  const r = new Rng(1837);
+  const sky = g.createLinearGradient(0, 0, 0, h * 0.62);
+  sky.addColorStop(0, '#ff9a6b');
+  sky.addColorStop(1, '#ffe2a8');
+  g.fillStyle = sky;
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = '#ffd25a';
+  g.beginPath();
+  g.arc(w * 0.78, h * 0.38, h * 0.12, 0, Math.PI * 2);
+  g.fill();
+  drawChicagoSkyline(g, 0, h * 0.62, w, h * 0.42, r, { tones: ['#5b3f6a', '#6b4a78', '#7a5886'], dark: '#2a1c36', glass: '#8a6aa0', windows: 'rgba(255,220,150,0.5)' });
+  const lake = g.createLinearGradient(0, h * 0.62, 0, h);
+  lake.addColorStop(0, '#2f8fd8');
+  lake.addColorStop(1, '#14508f');
+  g.fillStyle = lake;
+  g.fillRect(0, h * 0.62, w, h * 0.38);
+  for (let i = 0; i < 4; i++) {
+    const sx = w * (0.12 + i * 0.22), sy = h * (0.74 + (i % 2) * 0.08);
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.moveTo(sx, sy);
+    g.lineTo(sx, sy - 34);
+    g.lineTo(sx + 22, sy);
+    g.fill();
+    g.fillStyle = '#7a3b22';
+    g.fillRect(sx - 12, sy, 36, 6);
+  }
+  g.save();
+  g.translate(0, h * 0.04);
+  drawText(g, 'GREETINGS FROM', w, h * 0.12, { fg: '#ffffff', stroke: '#14315e' });
+  g.translate(0, h * 0.1);
+  drawText(g, 'CHICAGO', w, h * 0.2, { fg: CHI_RED, stroke: '#ffffff' });
+  g.restore();
+  drawChicagoFlag(g, w * 0.04, h * 0.84, w * 0.18, h * 0.12);
+  g.strokeStyle = '#ffffff';
+  g.lineWidth = 10;
+  g.strokeRect(5, 5, w - 10, h - 10);
 }

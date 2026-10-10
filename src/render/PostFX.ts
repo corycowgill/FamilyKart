@@ -27,6 +27,8 @@ export interface PostViewport {
   speed: number;
   /** 0..1 boost amount */
   boost: number;
+  /** sun in viewport-local uv (x, y) + visibility 0..1 for the sunset lens flare */
+  sun?: [number, number, number];
 }
 
 export interface PostConfig {
@@ -142,12 +144,17 @@ export class PostFX {
         fx0: { value: new THREE.Vector2() },
         fx1: { value: new THREE.Vector2() },
         aspect: { value: 1 },
+        sun0: { value: new THREE.Vector3() },
+        sun1: { value: new THREE.Vector3() },
+        flareCol: { value: new THREE.Color() },
+        flareStrength: { value: 0 },
       },
       vertexShader: VERT,
       fragmentShader: /* glsl */ `
         uniform sampler2D tScene; uniform sampler2D tBloom; uniform float bloomStrength; uniform float exposure;
         uniform float saturation; uniform float contrast; uniform vec3 tint; uniform vec3 shadowTint; uniform vec3 highlightTint; uniform float vignette; uniform float time;
         uniform vec4 vp0; uniform vec4 vp1; uniform vec2 fx0; uniform vec2 fx1; uniform float aspect;
+        uniform vec3 sun0; uniform vec3 sun1; uniform vec3 flareCol; uniform float flareStrength;
         varying vec2 vUv;
         float hash11(float p){ p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
         float hash21(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -156,6 +163,36 @@ export class PostFX {
           #if BLOOM
             c += texture2D(tBloom, vUv).rgb * bloomStrength;
           #endif
+          bool second = vp1.z > 0.0 && vUv.x >= vp1.x && vUv.x <= vp1.x + vp1.z && vUv.y >= vp1.y && vUv.y <= vp1.y + vp1.w;
+          vec4 r = second ? vp1 : vp0;
+          vec2 luv = (vUv - r.xy) / r.zw;
+          float la = aspect * r.z / r.w;
+          if (flareStrength > 0.0) {
+            // cheap sunset lens flare: halo + anamorphic streak + ghosts, occluded by sampling bloom at the sun
+            vec3 sn = second ? sun1 : sun0;
+            if (sn.z > 0.001) {
+              vec2 sp = sn.xy;
+              float occ = 1.0;
+              #if BLOOM
+                vec3 bs = texture2D(tBloom, r.xy + clamp(sp, 0.0, 1.0) * r.zw).rgb;
+                occ = smoothstep(0.08, 0.7, dot(bs, vec3(0.3333)));
+              #endif
+              vec2 dv = (luv - sp) * vec2(la, 1.0);
+              float dl = length(dv);
+              vec3 f = flareCol * (exp(-dl * 6.0) * 0.55 + exp(-abs(dv.y) * 120.0) * exp(-abs(dv.x) * 2.2) * 0.4);
+              vec2 axis = vec2(0.5) - sp;
+              for (int i = 0; i < 4; i++) {
+                float fi = float(i);
+                float k = 0.6 + fi * 0.48;
+                vec2 gp = sp + axis * k * 2.0;
+                float rad = 0.03 + 0.025 * mod(fi * 1.7, 3.0);
+                float gd = length((luv - gp) * vec2(la, 1.0));
+                vec3 gc = mix(vec3(1.0, 0.55, 0.35), vec3(0.55, 0.7, 1.0), fract(fi * 0.37 + 0.2));
+                f += gc * smoothstep(rad, rad * 0.55, gd) * 0.07;
+              }
+              c += f * sn.z * occ * flareStrength;
+            }
+          }
           gl_FragColor = vec4(c * exposure, 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -166,11 +203,7 @@ export class PostFX {
           c = (c - 0.5) * contrast + 0.5;
           c *= tint * mix(shadowTint, highlightTint, smoothstep(0.08, 0.85, l));
           // viewport-local effects
-          bool second = vp1.z > 0.0 && vUv.x >= vp1.x && vUv.x <= vp1.x + vp1.z && vUv.y >= vp1.y && vUv.y <= vp1.y + vp1.w;
-          vec4 r = second ? vp1 : vp0;
           vec2 fx = second ? fx1 : fx0;
-          vec2 luv = (vUv - r.xy) / r.zw;
-          float la = aspect * r.z / r.w;
           vec2 d = (luv - vec2(0.5, 0.55)) * vec2(la, 1.0);
           float rad = length(d) / max(1.0, la * 0.62);
           c *= 1.0 - vignette * smoothstep(0.35, 1.05, length((luv - 0.5) * vec2(1.0, 0.85)) * 1.25);
@@ -263,6 +296,9 @@ export class PostFX {
     u.vignette.value = grade.vignette;
     u.time.value = this.time;
     u.aspect.value = cssW / Math.max(1, cssH);
+    const flare = scene.userData.sunFlare as { strength: number; color: THREE.ColorRepresentation } | undefined;
+    u.flareStrength.value = flare ? flare.strength : 0;
+    if (flare) u.flareCol.value.set(flare.color);
     const k = 1 - Math.exp(-6 * dt);
     viewports.slice(0, 2).forEach((v, i) => {
       const s = this.smooth[i];
@@ -270,6 +306,8 @@ export class PostFX {
       s.boost += (v.boost - s.boost) * k;
       (i === 0 ? u.vp0 : u.vp1).value.set(...v.rect);
       (i === 0 ? u.fx0 : u.fx1).value.set(s.speed, s.boost);
+      const sn = v.sun;
+      (i === 0 ? u.sun0 : u.sun1).value.set(sn ? sn[0] : 0, sn ? sn[1] : 0, sn ? sn[2] : 0);
     });
     if (viewports.length < 2) u.vp1.value.set(0, 0, 0, 0);
     gl.setRenderTarget(null);

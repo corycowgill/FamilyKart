@@ -76,6 +76,27 @@ The tuning was isolated with an experiment that equalised stats and/or disabled 
 * There are about 4 shield blocks per race.
 * With a 2.2 s invulnerability window after each hit, nobody gets stun-locked. Unit tests cover this.
 
+## Windy City Gust (new item)
+
+`windyGust` hits every racer **ahead** of the user, wherever they are on the track. Each victim's speed is scaled
+by ×0.65 over 0.6 s (applied gradually by `ItemSystem.step`, never a spin-out). It also gets a 5 m/s shove toward
+the outside of the road, a 0.6 s "blown" state (`sim.items.blownTime(id)`) and 0.8 s of invulnerability, so gusts
+cannot stun-lock. A bubble shield deflects the wind and is **not** popped. Rockets and invulnerable karts are
+unaffected. Tuning lives in `ITEM_TUNING.gust`.
+
+* Weight: `p > 0.2 ? 1.4·(p − 0.2) : 0`. The front of the pack never gets it, and last place gets about 10% of its
+  rolls as gusts. It is also one of the Mystery Box outcomes.
+* AI: fires it when 2 or more unshielded racers are within 80 m ahead. Otherwise it occasionally fires with only
+  one racer in range, and rarely at random on low skill.
+* Harness, `--races 120 --track all --difficulty all`, seeds 1–4 (480 races): all PASS. Gust is 3.5% of granted
+  items, and "wind" is about 6.2 hits per race.
+* Win rates, 4-seed average without → with the gust: dad 23.6 → 24.4%, mom 10.6 → 9.2%, bro1 21.9 → 21.7%,
+  bro2 21.9 → 21.7%, lupin 9.8 → 12.1%, grandma 12.3 → 11.0%. Every change is within about 1 standard error
+  (±1.4–2%).
+* With the default seed 1, dad reaches 28.3% and bro1 26.7%. Without the gust, seed 1 had bro1 at 27.5%.
+* An earlier version also popped shields and cancelled boosts. It cost Mom about 3 points (Mom Shield got used up
+  by gusts), so both were dropped.
+
 ## AI drifting is ineffective
 
 * AI karts start about **105 drifts per race (17 per kart)**, and each one includes a hop. **Only 5.4% end in a

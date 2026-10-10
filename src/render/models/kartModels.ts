@@ -18,6 +18,31 @@ import {
   textured,
 } from './materials';
 import { hoodTexture, sideTexture, tennisBallTexture, treadTexture } from './textures';
+import { liveryById, type LiveryId } from './liveries';
+import { liveryDecalMat, liveryPaint, liverySolid, type LiveryDims } from './liveryPaint';
+import { addLiveryProp, type PropAnchor } from './liveryProps';
+import { liveryHoodTexture, liverySideTexture } from './liveryTextures';
+
+// ---------------------------------------------------------------------------------------------
+// Livery registry: which paint job each racer's kart gets the next time buildKart() runs.
+// The game sets this from the save before building a race / showroom / podium. Unset = factory paint.
+// ---------------------------------------------------------------------------------------------
+
+const liveryRegistry = new Map<CharacterId, LiveryId>();
+
+export function setLivery(character: CharacterId, livery: LiveryId | null): void {
+  if (livery) liveryRegistry.set(character, livery);
+  else liveryRegistry.delete(character);
+}
+
+export function getLivery(character: CharacterId): LiveryId | null {
+  return liveryRegistry.get(character) ?? null;
+}
+
+/** Back to factory paint for everyone. */
+export function clearLiveries(): void {
+  liveryRegistry.clear();
+}
 
 /**
  * Procedural cartoon go-karts. One parametric builder; each racer gets a style that changes the
@@ -224,16 +249,34 @@ function buildWheel(ws: WheelSpec, st: KartStyle, side: number): THREE.Group {
 // Builder
 // ---------------------------------------------------------------------------------------------
 
-export function buildKart(def: CharacterDef): KartRig {
+export function buildKart(baseDef: CharacterDef): KartRig {
+  const liv = getLivery(baseDef.id);
+  const L = liv ? liveryById(liv) : null;
+  // a livery re-colours every part that used the racer's colours
+  const def: CharacterDef = L ? { ...baseDef, colors: { ...baseDef.colors, primary: L.colors.wing, secondary: L.colors.pod, accent: L.colors.trim } } : baseDef;
   const st = styleFor(def);
+  if (L) {
+    st.body = L.colors.body;
+    st.pod = L.colors.pod;
+    st.trim = L.colors.trim;
+    st.hub = L.colors.hub;
+    if (liv === 'bean' || liv === 'lTrain') st.rim = '#ffffff';
+  }
   const id = def.id;
   const root = new THREE.Group();
   root.name = `kart:${id}`;
   const body = new THREE.Group();
   root.add(body);
 
-  const bodyPaint = paint(st.body);
-  const podPaint = st.pod === '#151515' || st.pod === '#161616' || st.pod === '#2a2a2a' ? paint(st.pod, 0.4) : paint(st.pod);
+  const seatZ = -0.15;
+  const dims: LiveryDims = {
+    len: st.len, rear: st.rear, bodyW: st.bodyW, noseY: st.noseY, dashY: st.dashY, dashZ: st.dashZ, cockpitY: st.cockpitY, engineY: st.engineY,
+    cockBack: seatZ - 0.3 - 0.12, podTop: st.podTop,
+  };
+  const bodyPaint: THREE.Material = liv ? liveryPaint(liv, id, 'tub', dims) : paint(st.body);
+  const podPaint: THREE.Material = liv ? liverySolid(liv, st.pod) : st.pod === '#151515' || st.pod === '#161616' || st.pod === '#2a2a2a' ? paint(st.pod, 0.4) : paint(st.pod);
+  const podSidePaint: THREE.Material = liv ? liveryPaint(liv, id, 'pod', dims) : podPaint;
+  const solid = (color: string, r?: number): THREE.Material => (liv ? liverySolid(liv, color, r) : paint(color, r));
   const dark = plastic('#1d1d22', 0.6, 0.2);
   const metal = plastic('#5b5f68', 0.35, 0.8);
 
@@ -243,14 +286,13 @@ export function buildKart(def: CharacterDef): KartRig {
   body.add(floor);
 
   // ---- main tub (side profile extruded across the width) ----
-  const L = st.len;
+  const LEN = st.len;
   const R = st.rear;
-  const seatZ = -0.15;
   const cockFront = st.dashZ - 0.06;
   const cockBack = seatZ - 0.3;
   const prof: Array<[number, number, number]> = [
-    [L - 0.04, 0.15, 0.05],
-    [L, st.noseY, st.round],
+    [LEN - 0.04, 0.15, 0.05],
+    [LEN, st.noseY, st.round],
     [st.dashZ, st.dashY, 0.08],
     [cockFront, st.cockpitY + 0.02, 0.04],
     [cockBack, st.cockpitY, 0.04],
@@ -264,15 +306,16 @@ export function buildKart(def: CharacterDef): KartRig {
 
   // hood decal sits on the straight hood segment
   {
-    const hoodA = new THREE.Vector2(L, st.noseY);
+    const hoodA = new THREE.Vector2(LEN, st.noseY);
     const hoodB = new THREE.Vector2(st.dashZ, st.dashY);
     const hoodLen = hoodA.distanceTo(hoodB);
     const slope = Math.atan2(hoodB.y - hoodA.y, hoodA.x - hoodB.x);
     const mid = hoodA.clone().lerp(hoodB, 0.5);
-    const tex = hoodTexture(id, def.emblem, def.colors);
     const dw = st.bodyW * 0.82;
     const dl = Math.min(hoodLen * 0.85, dw * 2);
-    const decal = new THREE.Mesh(cachedGeo(`hoodplane:${dw}:${dl}`, () => new THREE.PlaneGeometry(dw, dl)), decalMat(`hood:${id}`, tex));
+    const tex = liv ? liveryHoodTexture(liv, id, dl / dw) : hoodTexture(id, def.emblem, def.colors);
+    const decal = new THREE.Mesh(cachedGeo(`hoodplane:${dw}:${dl}`, () => new THREE.PlaneGeometry(dw, dl)), liv ? liveryDecalMat(`hood:${liv}:${id}`, tex, liv) : decalMat(`hood:${id}`, tex));
+    if (liv && !tex) decal.visible = false;
     const n = new THREE.Vector2(Math.sin(slope), Math.cos(slope));
     decal.position.set(0, mid.y + n.y * 0.056, mid.x + n.x * 0.056);
     decal.rotation.x = -Math.PI / 2 + slope;
@@ -296,14 +339,15 @@ export function buildKart(def: CharacterDef): KartRig {
     [-0.4, 0.18, 0.06],
   ];
   const podGeo = sideExtrude(`pod:${id}`, podProf, st.podW, 0.04);
-  const sideTex = sideTexture(id, def.emblem, def.colors);
+  const sideTex = liv ? liverySideTexture(liv, id, def.emblem) : sideTexture(id, def.emblem, def.colors);
+  const sideMat = liv ? liveryDecalMat(`side:${liv}:${id}`, sideTex, liv) : decalMat(`side:${id}`, sideTex);
   for (const s of [-1, 1]) {
-    const pod = mesh(podGeo, podPaint);
+    const pod = mesh(podGeo, podSidePaint);
     pod.position.x = s * podX;
     body.add(pod);
     const dw = 0.74;
     const dh = 0.23;
-    const decal = new THREE.Mesh(cachedGeo(`sideplane:${dw}:${dh}`, () => new THREE.PlaneGeometry(dw, dh)), decalMat(`side:${id}`, sideTex));
+    const decal = new THREE.Mesh(cachedGeo(`sideplane:${dw}:${dh}`, () => new THREE.PlaneGeometry(dw, dh)), sideMat);
     decal.position.set(s * (podX + st.podW / 2 + 0.006), (0.16 + st.podTop) / 2 + 0.01, 0.01);
     decal.rotation.y = s * Math.PI / 2;
     decal.renderOrder = 1;
@@ -388,7 +432,7 @@ export function buildKart(def: CharacterDef): KartRig {
   for (const s of [-1, 1]) {
     if (st.roundLights) {
       const ring = mesh(cachedGeo('hlring', () => new THREE.TorusGeometry(0.075, 0.02, 6, 16)), chrome());
-      ring.position.set(s * 0.3, st.noseY - 0.04, L + 0.05);
+      ring.position.set(s * 0.3, st.noseY - 0.04, LEN + 0.05);
       body.add(ring);
       const lamp = mesh(sphereGeo(14, 10), glow('#fff6d8', 1.2), false);
       lamp.scale.set(0.072, 0.072, 0.04);
@@ -396,7 +440,7 @@ export function buildKart(def: CharacterDef): KartRig {
       body.add(lamp);
     } else {
       const lamp = mesh(roundedBox(0.16, 0.06, 0.05, 0.02, 1), glow('#fff6d8', 1.2), false);
-      lamp.position.set(s * st.bodyW * 0.33, st.noseY - 0.05, L + 0.025);
+      lamp.position.set(s * st.bodyW * 0.33, st.noseY - 0.05, LEN + 0.025);
       lamp.rotation.z = s * 0.15;
       body.add(lamp);
     }
@@ -409,27 +453,27 @@ export function buildKart(def: CharacterDef): KartRig {
   const bumperMat = st.bumper === 'chrome' ? chrome() : plastic(id === 'dad' ? def.colors.secondary : '#1f1f24', 0.5);
   if (st.bumper === 'blade') {
     const wing = mesh(roundedBox(1.42, 0.035, 0.2, 0.015, 1), plastic('#151515', 0.4));
-    wing.position.set(0, 0.2, L + 0.06);
+    wing.position.set(0, 0.2, LEN + 0.06);
     body.add(wing);
     for (const s of [-1, 1]) {
-      const plate = mesh(roundedBox(0.03, 0.12, 0.24, 0.012, 1), paint(st.trim));
-      plate.position.set(s * 0.71, 0.24, L + 0.06);
+      const plate = mesh(roundedBox(0.03, 0.12, 0.24, 0.012, 1), solid(st.trim));
+      plate.position.set(s * 0.71, 0.24, LEN + 0.06);
       body.add(plate);
     }
   } else {
     const r = st.bumper === 'round' ? 0.075 : 0.06;
-    const bar = mesh(capsuleGeo(r, st.bodyW + 0.2, 10), st.bumper === 'round' ? paint(st.pod === '#2a2a2a' ? '#2a2a2a' : st.pod) : bumperMat);
+    const bar = mesh(capsuleGeo(r, st.bodyW + 0.2, 10), st.bumper === 'round' ? solid(st.pod === '#2a2a2a' ? '#2a2a2a' : st.pod) : bumperMat);
     bar.rotation.z = Math.PI / 2;
-    bar.position.set((st.bodyW + 0.2) / 2, 0.22, L + 0.05);
+    bar.position.set((st.bodyW + 0.2) / 2, 0.22, LEN + 0.05);
     body.add(bar);
     if (st.bumper === 'splitter') {
-      const sp = mesh(roundedBox(st.bodyW + 0.5, 0.05, 0.26, 0.02, 1), paint(def.colors.secondary));
-      sp.position.set(0, 0.13, L + 0.02);
+      const sp = mesh(roundedBox(st.bodyW + 0.5, 0.05, 0.26, 0.02, 1), solid(def.colors.secondary));
+      sp.position.set(0, 0.13, LEN + 0.02);
       body.add(sp);
       // aggressive canards
       for (const s of [-1, 1]) {
         const can = mesh(roundedBox(0.22, 0.03, 0.14, 0.01, 1), plastic('#151515', 0.4));
-        can.position.set(s * (st.bodyW / 2 + 0.06), 0.3, L - 0.05);
+        can.position.set(s * (st.bodyW / 2 + 0.06), 0.3, LEN - 0.05);
         can.rotation.z = s * -0.25;
         body.add(can);
       }
@@ -441,7 +485,8 @@ export function buildKart(def: CharacterDef): KartRig {
   body.add(rearBar);
 
   // ---- spoiler / accessories ----
-  buildSpoiler(body, st, def, R);
+  const anchor = buildSpoiler(body, st, def, R, solid);
+  if (liv) addLiveryProp(liv, body, anchor);
 
   // ---- wheels ----
   const wheels: THREE.Object3D[] = [];
@@ -463,7 +508,7 @@ export function buildKart(def: CharacterDef): KartRig {
       const wantFender = st.fenders === 'all' || (st.fenders === 'front' && front);
       if (wantFender) {
         // cartoon bubble mudguard hugging the top of the tyre
-        const f = mesh(sphereGeo(14, 9), paint(st.body));
+        const f = mesh(sphereGeo(14, 9), L ? solid(L.colors.fender) : paint(st.body));
         f.scale.set(ws.w / 2 + 0.07, ws.r * 0.55, ws.r + 0.12);
         f.position.set(0, ws.r * 0.62, 0);
         holder.add(f);
@@ -488,9 +533,11 @@ export function buildKart(def: CharacterDef): KartRig {
   };
 }
 
-function buildSpoiler(body: THREE.Group, st: KartStyle, def: CharacterDef, R: number): void {
+/** Builds the spoiler and returns where a livery accessory can sit on top of it. */
+function buildSpoiler(body: THREE.Group, st: KartStyle, def: CharacterDef, R: number, paint: (color: string, roughness?: number) => THREE.Material): PropAnchor {
   const c = def.colors;
   const y0 = st.engineY;
+  let anchor: PropAnchor = { x: 0, y: y0 + 0.1, z: R + 0.3, post: 0.2 };
   switch (st.spoiler) {
     case 'bigwing':
     case 'wing': {
@@ -517,6 +564,7 @@ function buildSpoiler(body: THREE.Group, st: KartStyle, def: CharacterDef, R: nu
         stripe.rotation.x = -0.14;
         body.add(stripe);
       }
+      anchor = { x: 0, y: y0 + h + (big ? 0.035 : 0.025), z: R + 0.06, post: 0 };
       break;
     }
     case 'fin': {
@@ -547,6 +595,7 @@ function buildSpoiler(body: THREE.Group, st: KartStyle, def: CharacterDef, R: nu
         plate.rotation.x = 0.25;
         body.add(plate);
       }
+      anchor = { x: 0.3, y: y0 + 0.42, z: R, post: 0 };
       break;
     }
     case 'lip': {
@@ -558,6 +607,7 @@ function buildSpoiler(body: THREE.Group, st: KartStyle, def: CharacterDef, R: nu
       pod.scale.set(0.2, 0.12, 0.2);
       pod.position.set(0, y0 + 0.06, R + 0.3);
       body.add(pod);
+      anchor = { x: 0, y: y0 + 0.16, z: R + 0.3, post: 0 };
       break;
     }
     case 'bone': {
@@ -606,6 +656,7 @@ function buildSpoiler(body: THREE.Group, st: KartStyle, def: CharacterDef, R: nu
           mini.add(k);
         }
       }
+      anchor = { x: 0, y: y0 + 0.395, z: R + 0.08, post: 0 };
       break;
     }
     case 'retro': {
@@ -650,7 +701,9 @@ function buildSpoiler(body: THREE.Group, st: KartStyle, def: CharacterDef, R: nu
       ctr.scale.set(0.035, 0.035, 0.02);
       daisy.add(ctr);
       daisy.rotation.y = Math.PI;
+      anchor = { x: -0.3, y: y0 - 0.03, z: R + 0.3, post: 0.26 };
       break;
     }
   }
+  return anchor;
 }

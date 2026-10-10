@@ -8,6 +8,7 @@ import {
   aonCenter, ballpark, basculeLeaf, beam, beefStand, bluesClub, buildChicagoFlag, buildGreenRiver, buildLakeMichigan, bannerBatch, chicagoTheatre, cloudGate,
   cornerTavern, CTA, dibsGeo, elevatedL, faceRoad, findSpot, glassSpireTower, hancockCenter, hotDogStand, Kit, lifeguardGeo, marinaCity, pizzeria, popcornShop,
   rooftopTankGeo, sweetHomeBillboard, tribuneTower, twoFlat, bungalow, waterTowerCastle, wavyTower, willisTower, windGusts, wrigleyBuilding, type P,
+  kites, runningDogs,
 } from './chicagoLandmarks';
 
 /**
@@ -24,7 +25,7 @@ export function buildSweetHome(ctx: SceneryContext): SceneryHandle {
   const def = track.def;
   const rng = new Rng(6060);
   const lm = (kind: string) => def.landmarks.find((l) => l.kind === kind);
-  const kit = new Kit(bag, group, { lit: 0, snow: false, quality });
+  const kit = new Kit(bag, group, { lit: 0, snow: false, quality, atlas: 2048 }); // 1024 overflowed ("sign atlas full")
   const hi = quality === 'high', lo = quality === 'low';
   const vc = kit.solidMat;
   const updaters = kit.updaters;
@@ -498,6 +499,13 @@ export function buildSweetHome(ctx: SceneryContext): SceneryHandle {
       });
       gulls.instanceMatrix.needsUpdate = true;
     });
+  }
+
+  /* ------------------------------------------------ MOAR Chicago life: dogs + kites on Oak Street Beach */
+  if (!lo) {
+    const bc = lm('beach') ?? { x: 186, z: 70 };
+    runningDogs(kit, () => 0.06, [[-10, -40], [-14, 10], [-8, 58], [-20, 35]].slice(0, hi ? 4 : 2).map(([dx, dz]) => ({ x: shoreX + dx, z: bc.z + dz })), { r: [2, 4], seed: 61 });
+    kites(kit, [-50, 0, 50].map((dz) => ({ x: shoreX - rng.range(4, 16), z: bc.z + dz, h: rng.range(24, 34) })), 62);
   }
 
   kit.flush();

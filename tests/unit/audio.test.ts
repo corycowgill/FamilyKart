@@ -27,7 +27,7 @@ describe('AudioEngine in Node (no Web Audio)', () => {
   });
 
   it('covers every SfxName and exports a singleton', () => {
-    expect(SFX_NAMES.length).toBe(33);
+    expect(SFX_NAMES.length).toBe(34);
     expect(audio).toBeInstanceOf(AudioEngine);
   });
 

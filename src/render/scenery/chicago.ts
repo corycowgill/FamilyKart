@@ -9,6 +9,7 @@ import {
   adlerPlanetarium, aonCenter, beam, bluesClub, sweetHomeBillboard, windGusts, buildBuckingham, buildNavyPier, artMuseum, bannerBatch, beefStand, bikeDockGeo, busShelterGeo, chicagoTheatre, cloudGate, CTA, crownFountain, elevatedL, faceRoad,
   findSpot, glassSpireTower, hancockCenter, hotDogStand, Kit, lifeguardGeo, marinaCity, merchMart, museumHall, picasso, pizzeria, popcornShop, pritzkerPavilion,
   rooftopTankGeo, sheddAquarium, tribuneTower, waterTowerCastle, wavyTower, willisTower, wrigleyBuilding,
+  kites, runningDogs,
 } from './chicagoLandmarks';
 
 /**
@@ -28,7 +29,7 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
   const vc = vcMat(bag);
   const vcGloss = vcMat(bag, { roughness: 0.35, metalness: 0.3 });
   const shoreX = field.shoreX;
-  const kit = new Kit(bag, group, { lit: 0, snow: false, quality });
+  const kit = new Kit(bag, group, { lit: 0, snow: false, quality, atlas: 2048 }); // 1024 overflowed ("sign atlas full")
   const hi = quality === 'high', lo = quality === 'low';
 
   /* ------------------------------------------------ Lake Michigan */
@@ -705,6 +706,13 @@ export function buildChicago(ctx: SceneryContext): SceneryHandle {
   updaters.push(cloudUpdate);
 
   if (!lo) windGusts(kit, ['#7cc65a', '#c9e265', '#f2b13c', '#e0882c', '#ffffff'], hi ? 420 : 200, { speed: 10 });
+  /* ------------------------------------------------ MOAR Chicago life: dogs in Grant Park, kites over the beach */
+  if (!lo) {
+    const fb = field.bounds;
+    runningDogs(kit, (x, z) => field.height(x, z), placer.scatter(hi ? 10 : 5, { minX: fb.minX - 20, maxX: Math.min(fb.maxX, shoreX - 20), minZ: fb.minZ, maxZ: fb.maxZ }, 8, 3), { seed: 312 });
+    kites(kit, [0, 1, 2].map((i) => ({ x: shoreX + rng.range(6, 16), z: 150 + i * 110, h: rng.range(24, 36) })), 41);
+  }
+
   kit.flush();
 
   trimShadows(group, quality);

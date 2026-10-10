@@ -58,6 +58,8 @@ export class TrackField {
   readonly bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   /** x beyond which terrain drops into a lake (Infinity = none) */
   readonly shoreX: number;
+  /** width of a flat sandy beach just inside the shoreline (shore landmark `scale`; 0 = none) */
+  readonly beachW: number;
   private grid = new Map<number, number[]>();
   private hills: number;
 
@@ -82,6 +84,7 @@ export class TrackField {
     this.hills = def.theme === 'dogpark' ? 7 : def.theme === 'snow' ? 1.2 : def.theme === 'neighborhood' ? 0.4 : 0;
     const shore = def.landmarks.find((l) => l.kind === 'shore');
     this.shoreX = shore ? shore.x : Infinity;
+    this.beachW = shore?.scale ?? 0;
     // channels: explicit landmarks, otherwise one per gap
     const main = track.paths[0];
     const gapCenters: Array<{ smp: TrackSample; len: number }> = [];
@@ -209,6 +212,12 @@ export class TrackField {
     const b = this.bounds;
     const edge = Math.min(x - (b.minX - 170), b.maxX + 170 - x, z - (b.minZ - 170), b.maxZ + 170 - z);
     h *= Math.max(0, Math.min(1, edge / 80));
+    if (this.beachW > 0 && x > this.shoreX - this.beachW - 40) {
+      // flatten the hills into a gently sloping sand beach
+      const t = Math.min(1, (x - (this.shoreX - this.beachW - 40)) / 40);
+      const beach = 0.25 + 1.1 * Math.max(0, Math.min(1, (this.shoreX - x) / this.beachW));
+      h += (beach - h) * t * t * (3 - 2 * t);
+    }
     if (x > this.shoreX) h = Math.min(h, -4);
     else if (x > this.shoreX - 6) h = Math.min(h, h + (-0.6 - h) * ((x - this.shoreX + 6) / 6));
     return h;

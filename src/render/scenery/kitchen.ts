@@ -1,9 +1,11 @@
+import { countScenery } from './__count_tmp'; // TEMPCOUNT
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { SceneryContext, SceneryHandle } from './types';
-import { Batch, ctxBits, disposeGroup, M, mergeColored, setInstance, vcMat } from './common';
+import { Batch, ctxBits, disposeGroup, M, mergeColored, setInstance, timeOfDay, trimShadows, vcMat } from './common';
 import { getField } from './field';
-import { canvasTexture, dotTexture, tileTexture } from './textures';
+import { canvasTexture, dotTexture, drawChicagoFlag, drawChicagoSkyline, star, tileTexture } from './textures';
+import { beam, chicagoHotDog, deepDishPizza, drawGreetingsPoster, drawText, giardinieraJar, italianBeef, Kit, popcornTin } from './chicagoLandmarks';
 
 type P = Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>;
 
@@ -31,16 +33,29 @@ function cerealTexture(name: string, bg: string, fg: string, seed: number): THRE
       g.arc(w / 2 + rng.range(-80, 80), h * 0.64 + rng.range(-24, 18), 9, 0, Math.PI * 2);
       g.stroke();
     }
-    g.font = '900 54px "Arial Black", Impact, sans-serif';
     g.textAlign = 'center';
     g.lineWidth = 8;
     g.strokeStyle = '#00000066';
     const words = name.split(' ');
     words.forEach((word, i) => {
+      let size = 54;
+      g.font = `900 ${size}px "Arial Black", Impact, sans-serif`;
+      while (size > 20 && g.measureText(word).width > w - 24) g.font = `900 ${--size}px "Arial Black", Impact, sans-serif`;
       g.strokeText(word, w / 2, 80 + i * 62);
       g.fillStyle = fg;
       g.fillText(word, w / 2, 80 + i * 62);
     });
+    // "Made in Chicago" badge: a little flag + star roundel
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.arc(w - 46, h - 46, 36, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#41B6E6';
+    g.fillRect(w - 80, h - 62, 68, 8);
+    g.fillRect(w - 80, h - 38, 68, 8);
+    g.fillStyle = '#E4002B';
+    star(g, w - 46, h - 46, 13, 6.5, 6);
+    drawChicagoFlag(g, 14, h - 52, 60, 40);
   }, { repeat: false, seed });
 }
 
@@ -56,6 +71,358 @@ function labelTexture(text: string, bg: string, fg: string, w = 256, h = 256): T
   }, { repeat: false });
 }
 
+/** The view out of the kitchen window: two-flat rooftops, the downtown skyline and the L structure. */
+function windowViewTexture(tod: 'day' | 'sunset' | 'night'): THREE.CanvasTexture {
+  return canvasTexture(1024, 640, (g, w, h, rng) => {
+    const night = tod === 'night', sunset = tod === 'sunset';
+    const sky = g.createLinearGradient(0, 0, 0, h * 0.7);
+    sky.addColorStop(0, night ? '#0b1030' : sunset ? '#3b3f8f' : '#4f9fea');
+    sky.addColorStop(1, night ? '#2a3366' : sunset ? '#ff9a6b' : '#d6f0ff');
+    g.fillStyle = sky;
+    g.fillRect(0, 0, w, h);
+    if (!night) {
+      g.fillStyle = sunset ? 'rgba(255,200,170,0.75)' : 'rgba(255,255,255,0.92)';
+      for (let i = 0; i < 7; i++) {
+        const cx = rng.next() * w, cy = rng.range(40, 200);
+        for (let k = 0; k < 5; k++) {
+          g.beginPath();
+          g.ellipse(cx + rng.range(-50, 50), cy + rng.range(-10, 10), rng.range(30, 60), rng.range(12, 24), 0, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+    } else {
+      g.fillStyle = '#ffffff';
+      for (let i = 0; i < 60; i++) g.fillRect(rng.next() * w, rng.next() * h * 0.4, 2, 2);
+    }
+    drawChicagoSkyline(g, -20, h * 0.84, w + 40, h * 0.72, rng, night
+      ? { tones: ['#1c2238', '#232a44', '#2a3150'], dark: '#0d1020', glass: '#2d3c63', windows: 'rgba(255,214,120,0.85)' }
+      : sunset ? { tones: ['#6a5a7a', '#7a6886', '#8a7a92'], dark: '#2a2236', glass: '#8c86a8', windows: 'rgba(255,220,160,0.45)' } : {});
+    // foreground two-flat rooftops with water tanks and chimneys
+    let x = -10;
+    while (x < w) {
+      const bw = rng.range(90, 150), top = h * rng.range(0.86, 0.9);
+      g.fillStyle = rng.pick(night ? ['#3a2018', '#4a281c', '#2e1a14'] : ['#9a4a32', '#b25a3c', '#7d3f2a', '#a8805a']);
+      g.fillRect(x, top, bw, h - top);
+      g.fillStyle = night ? '#1a1410' : '#e9dcc4';
+      g.fillRect(x - 3, top - 8, bw + 6, 10);
+      g.fillStyle = night ? 'rgba(255,200,110,0.9)' : '#3a4a5e';
+      for (let wy = top + 24; wy < h - 20; wy += 50) for (let wx = x + 16; wx < x + bw - 26; wx += 40) if (!night || rng.chance(0.6)) g.fillRect(wx, wy, 20, 30);
+      if (rng.chance(0.4)) {
+        g.fillStyle = night ? '#120c08' : '#6b4a2e';
+        g.fillRect(x + bw * 0.6, top - 52, 30, 34);
+        g.beginPath();
+        g.moveTo(x + bw * 0.6 - 4, top - 52);
+        g.lineTo(x + bw * 0.6 + 15, top - 66);
+        g.lineTo(x + bw * 0.6 + 34, top - 52);
+        g.fill();
+        g.fillRect(x + bw * 0.6 + 4, top - 18, 3, 12);
+        g.fillRect(x + bw * 0.6 + 23, top - 18, 3, 12);
+      }
+      x += bw + rng.range(4, 14);
+    }
+    // the green elevated L structure (the train runs on top: see lTrainTexture)
+    const deck = h * 0.8;
+    g.fillStyle = night ? '#1e2a1c' : '#3f5a3a';
+    g.fillRect(0, deck, w, 18);
+    g.strokeStyle = night ? '#1e2a1c' : '#3f5a3a';
+    g.lineWidth = 4;
+    for (let cx = 0; cx < w; cx += 36) {
+      g.beginPath();
+      g.moveTo(cx, deck + 18);
+      g.lineTo(cx + 18, deck + 2);
+      g.lineTo(cx + 36, deck + 18);
+      g.stroke();
+    }
+    for (let cx = 60; cx < w; cx += 210) g.fillRect(cx, deck + 18, 12, h - deck);
+  }, { repeat: false, seed: 1871 });
+}
+
+/** CTA L train cars on a transparent strip; slid across the window by animating the texture offset. */
+function lTrainTexture(): THREE.CanvasTexture {
+  const t = canvasTexture(1024, 640, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    const deck = h * 0.8, carW = 172, carH = 58;
+    for (let i = 0; i < 4; i++) {
+      const x = 170 + i * (carW + 6);
+      g.fillStyle = '#d4d9df';
+      g.fillRect(x, deck - carH, carW, carH);
+      g.fillStyle = '#9aa0a8';
+      g.fillRect(x + 4, deck - carH - 5, carW - 8, 6);
+      g.fillStyle = '#1f5fbf';
+      g.fillRect(x, deck - 20, carW, 5);
+      g.fillStyle = '#c60c30';
+      g.fillRect(x, deck - 14, carW, 4);
+      g.fillStyle = '#2a3446';
+      for (let k = 0; k < 6; k++) g.fillRect(x + 8 + k * 27, deck - carH + 10, 20, 18);
+      g.fillStyle = '#7d848e';
+      g.fillRect(x + carW * 0.33, deck - carH + 6, 2, carH - 12);
+      g.fillRect(x + carW * 0.66, deck - carH + 6, 2, carH - 12);
+      g.fillStyle = '#222';
+      g.fillRect(x + 14, deck - 6, 40, 6);
+      g.fillRect(x + carW - 54, deck - 6, 40, 6);
+    }
+    // destination sign on the lead car
+    g.fillStyle = '#111';
+    g.fillRect(170 + 3 * (carW + 6) + carW - 50, deck - carH + 6, 44, 14);
+    g.fillStyle = '#ffb000';
+    g.font = '900 11px Arial';
+    g.fillText('LOOP', 170 + 3 * (carW + 6) + carW - 44, deck - carH + 17);
+  }, { repeat: false });
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+/** Crayon scribble helper: wobbly polyline. */
+function crayon(g: CanvasRenderingContext2D, pts: Array<[number, number]>, col: string, wdt = 6, close = false): void {
+  g.strokeStyle = col;
+  g.lineWidth = wdt;
+  g.lineCap = g.lineJoin = 'round';
+  g.beginPath();
+  pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  if (close) g.closePath();
+  g.stroke();
+}
+
+function paper(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, rot: number, draw: () => void): void {
+  g.save();
+  g.translate(x + w / 2, y + h / 2);
+  g.rotate(rot);
+  g.translate(-w / 2, -h / 2);
+  g.fillStyle = 'rgba(0,0,0,0.18)';
+  g.fillRect(5, 6, w, h);
+  g.fillStyle = '#fffdf6';
+  g.fillRect(0, 0, w, h);
+  draw();
+  g.restore();
+}
+
+function magnet(g: CanvasRenderingContext2D, x: number, y: number, col: string): void {
+  g.fillStyle = 'rgba(0,0,0,0.25)';
+  g.beginPath();
+  g.arc(x + 2, y + 3, 11, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = col;
+  g.beginPath();
+  g.arc(x, y, 11, 0, Math.PI * 2);
+  g.fill();
+}
+
+/** Fridge door collage: kid drawings, Chicago-flag magnets, letter magnets and NO KETCHUP. */
+function drawFridgeArt(g: CanvasRenderingContext2D, w: number, h: number): void {
+  g.fillStyle = '#e9eef3';
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = '#9aa5b1';
+  g.fillRect(0, h * 0.655, w, 7);
+  // 1. the family go-kart race
+  paper(g, 24, 36, 280, 220, -0.06, () => {
+    g.fillStyle = '#ffe066';
+    g.beginPath();
+    g.arc(240, 40, 24, 0, Math.PI * 2);
+    g.fill();
+    crayon(g, [[10, 170], [270, 170]], '#555', 8);
+    const kart = (x: number, col: string) => {
+      g.fillStyle = col;
+      g.fillRect(x, 130, 56, 26);
+      g.fillStyle = '#222';
+      g.beginPath();
+      g.arc(x + 10, 160, 9, 0, Math.PI * 2);
+      g.arc(x + 46, 160, 9, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#f1c8a5';
+      g.beginPath();
+      g.arc(x + 28, 118, 12, 0, Math.PI * 2);
+      g.fill();
+    };
+    kart(16, '#2f7de1');
+    kart(96, '#e8443a');
+    kart(176, '#ffd23f');
+    g.fillStyle = '#e8443a';
+    g.font = '900 24px "Comic Sans MS", "Chalkboard SE", sans-serif';
+    g.textAlign = 'center';
+    g.fillText('MY FAMILY RACE!', 140, 205);
+  });
+  magnet(g, 160, 40, '#E4002B');
+  // 2. I <3 CHICAGO with the Bean and skyline
+  paper(g, 270, 250, 220, 250, 0.08, () => {
+    g.fillStyle = '#41B6E6';
+    for (const [bx, bh] of [[20, 90], [52, 140], [84, 70], [120, 160], [158, 110], [186, 80]]) g.fillRect(bx, 200 - bh, 26, bh);
+    g.fillStyle = '#222';
+    g.fillRect(124, 30, 4, 12);
+    g.fillRect(134, 30, 4, 12);
+    g.fillStyle = '#b9c2cc';
+    g.beginPath();
+    g.ellipse(110, 214, 60, 24, 0, Math.PI, 0);
+    g.fill();
+    g.fillStyle = '#E4002B';
+    g.font = '900 30px "Comic Sans MS", "Chalkboard SE", sans-serif';
+    g.textAlign = 'center';
+    g.fillText('I \u2665 CHICAGO', 110, 42);
+  });
+  magnet(g, 380, 252, '#41B6E6');
+  // 3. Lupin
+  paper(g, 30, 300, 220, 200, 0.05, () => {
+    g.fillStyle = '#f3e3c3';
+    for (const [x, y, r] of [[110, 110, 50], [70, 120, 30], [150, 120, 30], [110, 62, 34], [80, 50, 18], [140, 50, 18]]) {
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.fillStyle = '#222';
+    g.beginPath();
+    g.arc(98, 60, 5, 0, Math.PI * 2);
+    g.arc(122, 60, 5, 0, Math.PI * 2);
+    g.arc(110, 76, 7, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#2f7de1';
+    g.font = '900 30px "Comic Sans MS", "Chalkboard SE", sans-serif';
+    g.textAlign = 'center';
+    g.fillText('LUPIN', 110, 186);
+  });
+  magnet(g, 140, 302, '#3ccf6e');
+  // Chicago-flag magnets
+  for (const [x, y, r] of [[330, 40, 0.1], [400, 120, -0.12], [60, 540, 0.08], [300, 560, -0.05]]) {
+    g.save();
+    g.translate(x, y);
+    g.rotate(r);
+    g.fillStyle = 'rgba(0,0,0,0.25)';
+    g.fillRect(4, 5, 120, 80);
+    drawChicagoFlag(g, 0, 0, 120, 80);
+    g.restore();
+  }
+  // letter magnets
+  const letters: Array<[string, string]> = [['C', '#E4002B'], ['H', '#2f7de1'], ['I', '#ffd23f'], ['T', '#3ccf6e'], ['O', '#ff8a3d'], ['W', '#2f7de1'], ['N', '#E4002B']];
+  g.font = '900 54px "Arial Black", Impact, sans-serif';
+  g.textAlign = 'center';
+  letters.forEach(([c, col], i) => {
+    g.save();
+    g.translate(60 + (i % 4) * 62 + (i > 3 ? 30 : 0), 610 + (i > 3 ? 60 : 0));
+    g.rotate((i % 3) * 0.12 - 0.12);
+    g.fillStyle = col;
+    g.fillText(c, 0, 0);
+    g.restore();
+  });
+  // NO KETCHUP magnet (round)
+  const kx = 400, ky = 660;
+  g.fillStyle = '#ffffff';
+  g.beginPath();
+  g.arc(kx, ky, 72, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#d0121f';
+  g.fillRect(kx - 14, ky - 36, 28, 56);
+  g.fillRect(kx - 7, ky - 52, 14, 18);
+  g.strokeStyle = '#d0121f';
+  g.lineWidth = 12;
+  g.beginPath();
+  g.arc(kx, ky - 8, 50, 0, Math.PI * 2);
+  g.moveTo(kx - 36, ky - 44);
+  g.lineTo(kx + 36, ky + 28);
+  g.stroke();
+  g.fillStyle = '#111';
+  g.font = '900 22px "Arial Black", Impact, sans-serif';
+  g.fillText('NO KETCHUP!', kx, ky + 62);
+  // pizza night note (lower door)
+  paper(g, 20, h * 0.71, 220, 140, -0.04, () => {
+    g.fillStyle = '#E4002B';
+    g.font = '900 30px "Comic Sans MS", "Chalkboard SE", sans-serif';
+    g.textAlign = 'center';
+    g.fillText('FRIDAY =', 110, 50);
+    g.fillText('DEEP DISH!', 110, 92);
+    g.fillStyle = '#d99a4e';
+    g.beginPath();
+    g.arc(110, 124, 10, 0, Math.PI * 2);
+    g.fill();
+  });
+  magnet(g, 130, h * 0.71 + 6, '#ffd23f');
+}
+
+/** Dish towel printed with the Chicago flag, CHICAGO lettering and a fringe. */
+function drawFlagTowel(g: CanvasRenderingContext2D, w: number, h: number): void {
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = '#41B6E6';
+  g.fillRect(0, 22, w, 14);
+  g.fillRect(0, h - 66, w, 14);
+  drawChicagoFlag(g, 18, 60, w - 36, (w - 36) * 0.66);
+  g.fillStyle = '#E4002B';
+  g.font = '900 34px "Arial Black", Impact, sans-serif';
+  g.textAlign = 'center';
+  g.fillText('CHICAGO', w / 2, h - 90);
+  g.fillStyle = '#d9dde2';
+  for (let x = 4; x < w; x += 10) g.fillRect(x, h - 26, 4, 26);
+}
+
+function drawCookbook(g: CanvasRenderingContext2D, w: number, h: number): void {
+  g.fillStyle = '#b0201a';
+  g.fillRect(0, 0, w, h);
+  for (let y = 0; y < 2; y++) for (let x = 0; x < w / 16; x++) {
+    g.fillStyle = (x + y) % 2 ? '#ffffff' : '#b0201a';
+    g.fillRect(x * 16, y * 16, 16, 16);
+    g.fillRect(x * 16, h - 32 + y * 16, 16, 16);
+  }
+  drawText(g, 'DEEP DISH', w, 130, { fg: '#ffd23f', stroke: '#5a0d08' });
+  g.save();
+  g.translate(0, 110);
+  drawText(g, 'DELIGHTS', w, 70, { fg: '#ffffff' });
+  g.restore();
+  // pie illustration
+  const cx = w / 2, cy = 300;
+  g.fillStyle = '#2a2a2e';
+  g.beginPath();
+  g.ellipse(cx, cy + 14, 130, 54, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#d99a4e';
+  g.beginPath();
+  g.ellipse(cx, cy, 120, 48, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#c22d1b';
+  g.beginPath();
+  g.ellipse(cx, cy - 4, 104, 38, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#ffd65c';
+  g.fillRect(cx + 40, cy - 30, 12, 50);
+  g.save();
+  g.translate(0, 380);
+  drawText(g, 'A CHICAGO FAMILY\nCOOKBOOK', w, 90, { fg: '#ffffff' });
+  g.restore();
+  g.fillStyle = '#41B6E6';
+  g.fillRect(0, 36, w, 8);
+}
+
+function drawRadioFace(g: CanvasRenderingContext2D, w: number, h: number): void {
+  g.fillStyle = '#f1e6cf';
+  g.fillRect(0, 0, w, h);
+  // speaker grille
+  g.fillStyle = '#3a2a1e';
+  g.beginPath();
+  g.arc(110, h / 2, 74, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#c9a227';
+  for (let y = h / 2 - 60; y <= h / 2 + 60; y += 14) for (let x = 50; x <= 170; x += 14) if ((x - 110) ** 2 + (y - h / 2) ** 2 < 62 ** 2) g.fillRect(x - 2, y - 2, 5, 5);
+  // dial
+  g.fillStyle = '#1d1d22';
+  g.fillRect(210, 30, 280, 70);
+  g.fillStyle = '#ffd27a';
+  g.font = '700 18px monospace';
+  g.textAlign = 'center';
+  ['88', '92', '96', '100', '104', '108'].forEach((n, i) => g.fillText(n, 236 + i * 46, 58));
+  g.fillStyle = '#E4002B';
+  g.fillRect(372, 34, 4, 62);
+  g.fillStyle = '#ffd27a';
+  g.fillText('CHI-FM  BLUES & SOUL', 350, 90);
+  // knobs
+  for (const x of [260, 440]) {
+    g.fillStyle = '#5a3a26';
+    g.beginPath();
+    g.arc(x, 145, 26, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#c9a227';
+    g.fillRect(x - 2, 121, 4, 18);
+  }
+  g.fillStyle = '#c8202f';
+  g.font = '900 20px "Arial Black", Impact, sans-serif';
+  g.fillText('\u266A SWEET HOME \u266B', 350, 152);
+}
+
 export function buildKitchen(ctx: SceneryContext): SceneryHandle {
   const { track, group, quality } = ctx;
   const { bag, density, placer } = ctxBits(ctx);
@@ -64,6 +431,11 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
   const def = track.def;
   const lm = (kind: string) => def.landmarks.filter((l) => l.kind === kind);
   const updaters: Array<(dt: number, t: number) => void> = [];
+  const kit = new Kit(bag, group, { lit: 0, snow: false, quality, atlas: 2048 });
+  const tod = timeOfDay(group);
+  // keep the Chicago food / props clear of the scattered cutlery and cereal (they are built later)
+  const PROP_R: Record<string, number> = { giardiniera: 1.3, deepDish: 1.4, italianBeef: 0.9, chicagoDog: 0.75, popcornTin: 1.9, radio: 1.6, cookbook: 1.6 };
+  for (const l of def.landmarks) if (PROP_R[l.kind]) placer.reserve(l.x, l.z, PROP_R[l.kind] * (l.scale ?? 12) + 4);
   const vc = vcMat(bag, { roughness: 0.55 });
   const vcShiny = vcMat(bag, { roughness: 0.22, metalness: 0.2 });
   const b = field.bounds;
@@ -128,10 +500,54 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
       group.add(wall);
     }
     // window on the north wall with bright daylight
-    const win = new THREE.Mesh(bag.add(new THREE.PlaneGeometry(320, 200)), bag.add(new THREE.MeshBasicMaterial({ color: '#cfeeff', toneMapped: false, fog: false })));
+    // ...looking out at the skyline, with an L train rattling past now and then
+    const viewTex = bag.add(windowViewTexture(tod));
+    const win = new THREE.Mesh(bag.add(new THREE.PlaneGeometry(320, 200)), bag.add(new THREE.MeshBasicMaterial({ map: viewTex, toneMapped: false, fog: false })));
     win.position.set(cx + 60, 230, cz + R - 1);
     win.rotation.y = Math.PI;
+    win.name = 'windowView';
     group.add(win);
+    const trainTex = bag.add(lTrainTexture());
+    const train = new THREE.Mesh(bag.add(new THREE.PlaneGeometry(320, 200)), bag.add(new THREE.MeshBasicMaterial({ map: trainTex, alphaTest: 0.5, toneMapped: false, fog: false })));
+    train.position.set(cx + 60, 230, cz + R - 1.6);
+    train.rotation.y = Math.PI;
+    train.name = 'windowTrain';
+    group.add(train);
+    updaters.push((_dt, t) => {
+      const c = (t % 15) / 9;
+      trainTex.offset.x = c < 1 ? 0.95 - c * 1.9 : -1;
+    });
+    // SWEET HOME CHICAGO neon on the wall beside the window, a Chicago flag on the east wall
+    const neon = kit.neon.text('SWEET HOME\nCHICAGO', 512, 210, { bg: '#1c1430', fg: '#ff6fb0', bulbs: '#ffe066', stroke: '#41B6E6' });
+    kit.solid.push([new THREE.BoxGeometry(236, 100, 4), '#2a1f3d', M.t(cx - 245, 185, cz + R - 3)]);
+    kit.neon.quad(neon, 228, 94, M.trs(cx - 245, 185, cz + R - 5.2, 0, Math.PI, 0));
+    const flag = kit.paint.draw(384, 256, (g, w, h) => drawChicagoFlag(g, 0, 0, w, h), 'wallFlag');
+    kit.paint.quad(flag, 180, 120, M.trs(cx + R - 2, 260, cz + 60, 0, -Math.PI / 2, 0));
+    // "Greetings from Chicago" poster on the south wall, Chicago-flag bunting on the west wall
+    const poster = kit.paint.draw(512, 384, (g, w, hh) => drawGreetingsPoster(g, w, hh), 'greetings');
+    kit.solid.push([new THREE.BoxGeometry(236, 178, 3), '#8a5a2b', M.t(cx - 60, 170, cz - R + 2)]);
+    kit.paint.quad(poster, 224, 168, M.t(cx - 60, 170, cz - R + 3.6));
+    const pennant = kit.paint.draw(128, 128, (g, w, hh) => {
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.lineTo(w, 0);
+      g.lineTo(w / 2, hh);
+      g.closePath();
+      g.fill();
+      g.fillStyle = '#41B6E6';
+      g.fillRect(0, hh * 0.08, w, hh * 0.1);
+      g.fillStyle = '#E4002B';
+      star(g, w / 2, hh * 0.38, w * 0.16, w * 0.08, 6);
+    }, 'pennant');
+    for (let i = 0; i < 18; i++) {
+      const z = cz - 230 + i * 27;
+      const sag = Math.sin((i / 17) * Math.PI) * 18;
+      kit.paint.quad(pennant, 22, 22, M.trs(cx - R + 2, 236 - sag, z, 0, Math.PI / 2, 0));
+    }
+    kit.steel.push([new THREE.BoxGeometry(0.6, 0.6, 470), '#f4f4f4', M.t(cx - R + 1.6, 247 - 9, cz + 5)]);
+    for (const dz of [-92, 92]) kit.solid.push([new THREE.CylinderGeometry(2, 2, 6, 8).rotateZ(Math.PI / 2), '#c9a227', M.t(cx + R - 3, 322, cz + 60 + dz)]);
+    kit.solid.push([new THREE.CylinderGeometry(1.2, 1.2, 190, 8).rotateX(Math.PI / 2), '#8a5a2b', M.t(cx + R - 4, 322, cz + 60)]);
     const wparts: P = [
       [new THREE.BoxGeometry(340, 14, 12), '#ffffff', M.t(cx + 60, 125, cz + R - 4)],
       [new THREE.BoxGeometry(340, 14, 12), '#ffffff', M.t(cx + 60, 335, cz + R - 4)],
@@ -166,10 +582,10 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
 
   /* ------------------------------------------------ cereal boxes */
   const cereal = [
-    ['CRUNCHY OS', '#e8443a', '#ffd23f'],
-    ['CHOCO BLAST', '#5a2f1c', '#ff9fd0'],
-    ['HONEY BEES', '#ffb302', '#3a2a10'],
-    ['FROSTY FLAKES', '#2f7de1', '#ffffff'],
+    ['WINDY CITY OS', '#e8443a', '#ffd23f'],
+    ['CHOCO BEANS', '#5a2f1c', '#ff9fd0'],
+    ['L-TRAIN LOOPS', '#2f7de1', '#ffffff'],
+    ['LAKE FLAKES', '#ffb302', '#1d3f73'],
   ] as const;
   lm('cerealBox').forEach((c, i) => {
     const [name, bg, fg] = cereal[i % cereal.length];
@@ -210,15 +626,23 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
     });
   }
 
-  /* ------------------------------------------------ fridge (stands on the floor) */
+  /* ------------------------------------------------ fridge (stands on the floor): magnets, kid art, flag towel */
   for (const c of lm('fridge')) {
     const h = 260;
-    shiny.push([new THREE.BoxGeometry(80, h, 70), '#e9eef3', M.t(c.x, FLOOR_Y + h / 2, c.z)]);
-    parts.push([new THREE.BoxGeometry(80.5, 2, 70.5), '#9aa5b1', M.t(c.x, FLOOR_Y + h * 0.62, c.z)]);
-    parts.push([new THREE.BoxGeometry(4, 50, 4), '#9aa5b1', M.t(c.x + 30, FLOOR_Y + h * 0.75, c.z - 37)]);
-    parts.push([new THREE.BoxGeometry(4, 70, 4), '#9aa5b1', M.t(c.x + 30, FLOOR_Y + h * 0.35, c.z - 37)]);
-    // magnets / kid drawings
-    for (let i = 0; i < 7; i++) parts.push([new THREE.BoxGeometry(rng.range(8, 16), rng.range(8, 14), 0.6), rng.pick(['#ff5fa2', '#ffd23f', '#3ccf6e', '#2f7de1', '#ffffff']), M.trs(c.x + rng.range(-30, 20), FLOOR_Y + rng.range(140, 230), c.z - 35.3, 0, 0, rng.range(-0.2, 0.2))]);
+    const yaw = c.rot ?? Math.PI; // front (+Z local) faces the counter
+    const F = M.trs(c.x, FLOOR_Y, c.z, 0, yaw, 0);
+    const at = (lx: number, ly: number, lz: number, rx = 0, ry = 0, rz = 0) => F.clone().multiply(M.trs(lx, ly, lz, rx, ry, rz));
+    shiny.push([new THREE.BoxGeometry(80, h, 70), '#e9eef3', at(0, h / 2, 0)]);
+    parts.push([new THREE.BoxGeometry(80.5, 2, 70.5), '#9aa5b1', at(0, h * 0.62, 0)]);
+    parts.push([new THREE.BoxGeometry(4, 50, 4), '#9aa5b1', at(-33, h * 0.78, 37)]);
+    // lower door: horizontal bar handle with the dish towel folded over it
+    parts.push([new THREE.BoxGeometry(46, 3, 3), '#9aa5b1', at(14, 116, 39.5)]);
+    for (const hx of [-7, 35]) parts.push([new THREE.BoxGeometry(3, 3, 5), '#9aa5b1', at(hx, 116, 37.5)]);
+    const art = kit.paint.draw(512, 1024, (g, w, hh) => drawFridgeArt(g, w, hh), 'fridgeArt');
+    kit.paint.quad(art, 74, 148, at(0, 184, 35.4));
+    const towel = kit.paint.draw(256, 384, (g, w, hh) => drawFlagTowel(g, w, hh), 'flagTowel');
+    kit.paint.quad(towel, 30, 45, at(18, 116 - 22, 41.8, -0.06, 0, 0.03));
+    kit.paint.quad(towel, 30, 6, at(18, 117.6, 39.5, -Math.PI / 2, 0, 0));
     placer.reserve(c.x, c.z, 55);
   }
 
@@ -437,12 +861,86 @@ export function buildKitchen(ctx: SceneryContext): SceneryHandle {
     }
   }
 
+  /* ------------------------------------------------ Chicago food on the counter + table */
+  const onTop = (x: number, z: number, r: number) => {
+    placer.reserve(x, z, r);
+    return field.height(x, z);
+  };
+  {
+    const p = lm('deepDish')[0] ?? { x: -125, z: 132, rot: 2.4, scale: 13 };
+    deepDishPizza(kit, p.x, onTop(p.x, p.z, (p.scale ?? 13) * 1.3), p.z, p.rot ?? 0, p.scale ?? 13, undefined, p.y ?? 0.32);
+  }
+  for (const p of lm('italianBeef')) italianBeef(kit, p.x, onTop(p.x, p.z, (p.scale ?? 26) * 0.8), p.z, p.rot ?? 0, p.scale ?? 26);
+  for (const p of lm('chicagoDog')) chicagoHotDog(kit, p.x, onTop(p.x, p.z, (p.scale ?? 24) * 0.7), p.z, p.rot ?? 0, p.scale ?? 24);
+  for (const p of lm('giardiniera')) giardinieraJar(kit, p.x, onTop(p.x, p.z, (p.scale ?? 10) * 1.3), p.z, p.rot ?? 0, p.scale ?? 10);
+  for (const p of lm('popcornTin')) popcornTin(kit, p.x, onTop(p.x, p.z, (p.scale ?? 12) * 1.2), p.z, p.rot ?? 0, p.scale ?? 12);
+
+  /* ------------------------------------------------ deep-dish cookbook on a stand */
+  for (const p of lm('cookbook')) {
+    const y = onTop(p.x, p.z, 18);
+    const B = M.trs(p.x, y, p.z, 0, p.rot ?? 0, 0);
+    const at = (lx: number, ly: number, lz: number, rx = 0) => B.clone().multiply(M.trs(lx, ly, lz, rx, 0, 0));
+    const tilt = -0.28;
+    kit.solid.push([new THREE.BoxGeometry(32, 42, 5), '#f4ecd8', at(0, 22, 0, tilt)]);
+    kit.solid.push([new THREE.BoxGeometry(33, 43, 1.2), '#b0201a', at(0, 22.2, 2.9, tilt)]);
+    kit.solid.push([new THREE.BoxGeometry(2.5, 43, 6.4), '#8a1812', at(-16.6, 22.2, 0.3, tilt)]);
+    const cover = kit.paint.draw(384, 512, (g, w, hh) => drawCookbook(g, w, hh), 'cookbook');
+    kit.paint.quad(cover, 31, 41.3, at(0, 22.2, 3.55, tilt));
+    // wooden stand
+    kit.solid.push([new THREE.BoxGeometry(36, 2, 8), '#a8733f', at(0, 1, 2)]);
+    kit.solid.push([new THREE.BoxGeometry(3, 34, 2), '#a8733f', at(0, 16, -6, 0.38)]);
+    kit.solid.push([new THREE.BoxGeometry(34, 3, 2), '#8a5a2b', at(0, 2.5, 5.5)]);
+  }
+
+  /* ------------------------------------------------ retro radio playing (notes float out) */
+  for (const p of lm('radio')) {
+    const y = onTop(p.x, p.z, 18);
+    const B = M.trs(p.x, y, p.z, 0, p.rot ?? 0, 0);
+    const at = (lx: number, ly: number, lz: number, rx = 0, ry = 0, rz = 0) => B.clone().multiply(M.trs(lx, ly, lz, rx, ry, rz));
+    kit.gloss.push([new THREE.BoxGeometry(30, 16, 11), '#c8202f', at(0, 8.6, 0)]);
+    for (const ex of [-15, 15]) kit.gloss.push([new THREE.CylinderGeometry(8, 8, 11, 16, 1, false, 0, Math.PI).rotateX(Math.PI / 2).rotateZ(ex < 0 ? Math.PI / 2 : -Math.PI / 2), '#c8202f', at(ex, 8.6, 0, 0, 0, 0)]);
+    kit.solid.push([new THREE.BoxGeometry(46, 1, 11.4), '#e9dcc4', at(0, 0.5, 0)]);
+    const face = kit.paint.draw(512, 192, (g, w, hh) => drawRadioFace(g, w, hh), 'radioFace');
+    kit.paint.quad(face, 42, 15.7, at(0, 8.6, 5.65));
+    kit.gloss.push([new THREE.TorusGeometry(10, 0.9, 6, 18, Math.PI), '#d8dde3', at(0, 16.6, 0)]);
+    beam(kit.steel, [12, 16.6, -3], [26, 44, -6], 0.5, '#d8dde3', B);
+    kit.glow.push([new THREE.SphereGeometry(0.9, 8, 6), '#ffd23f', at(26, 44, -6)]);
+    // floating music notes
+    const noteGeo = bag.add(mergeColored([
+      [new THREE.SphereGeometry(1.4, 10, 8), '#ffffff', M.trs(0, 0, 0, 0, 0, 0.5, 1.2, 0.85, 0.6)],
+      [new THREE.BoxGeometry(0.45, 6, 0.45), '#ffffff', M.t(1.35, 3, 0)],
+      [new THREE.BoxGeometry(2.2, 0.8, 0.45), '#ffffff', M.trs(2.3, 5.6, 0, 0, 0, -0.5)],
+    ]));
+    const N = quality === 'low' ? 5 : 9;
+    const notes = new THREE.InstancedMesh(noteGeo, bag.add(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, emissive: '#331a33' })), N);
+    const nc = ['#ff5fa2', '#41B6E6', '#ffd23f', '#3ccf6e', '#E4002B', '#b26bff'];
+    for (let i = 0; i < N; i++) notes.setColorAt(i, new THREE.Color(nc[i % nc.length]));
+    notes.frustumCulled = false;
+    notes.name = 'radioNotes';
+    group.add(notes);
+    const yaw = p.rot ?? 0;
+    updaters.push((_dt, t) => {
+      for (let i = 0; i < N; i++) {
+        const c = (t * 0.22 + i / N) % 1;
+        const side = i % 2 ? 1 : -1;
+        const lx = side * (8 + c * 20) + Math.sin(t * 2 + i) * 3, ly = 18 + c * 46, lz = 4 + c * 10;
+        const sc = Math.sin(c * Math.PI) * 1.2;
+        setInstance(notes, i, p.x + Math.cos(yaw) * lx + Math.sin(yaw) * lz, y + ly, p.z - Math.sin(yaw) * lx + Math.cos(yaw) * lz, 0, yaw + Math.sin(t * 3 + i) * 0.5, Math.sin(t * 2.5 + i) * 0.3, Math.max(0.01, sc));
+      }
+      notes.instanceMatrix.needsUpdate = true;
+    });
+  }
+
   addMesh(parts, vc);
   addMesh(shiny, vcShiny);
+  kit.flush();
+  trimShadows(group, quality);
 
+  countScenery(group, 'kitchen-' + quality); // TEMPCOUNT
   return {
     update(dt: number, time: number) {
       for (const u of updaters) u(dt, time);
+      kit.update(dt, time);
     },
     dispose() {
       disposeGroup(group);

@@ -61,6 +61,23 @@ function horn(c: SfxCtx, start: number, dur: number, vol: number): void {
   }
 }
 
+/** Drawbar-organ chord: fundamental + octave + twelfth sines with a gentle Leslie-ish vibrato. */
+function organ(c: SfxCtx, start: number, notes: number[], dur: number, vol: number): void {
+  const v = vol / notes.length;
+  for (const m of notes) {
+    for (const [semi, lvl] of [[0, 1], [12, 0.6], [19, 0.35]] as Array<[number, number]>) {
+      tone(c.ctx, c.out, { type: 'sine', freq: N(m + semi, c.p), t: c.t + start, dur, vol: v * lvl, shape: 'asr', attack: 0.015, release: 0.09, vibRate: 6.3, vibDepth: 9 });
+    }
+  }
+}
+
+/** Tambourine hit: bright jingles (two resonant noise bands) with a short skin tap. */
+function tambourine(c: SfxCtx, start: number, vol: number): void {
+  noise(c.ctx, c.out, { t: c.t + start, dur: 0.16, vol, filter: 'bandpass', cutoff: 7200, q: 4 });
+  noise(c.ctx, c.out, { t: c.t + start + 0.008, dur: 0.12, vol: vol * 0.8, filter: 'bandpass', cutoff: 10500, q: 5 });
+  noise(c.ctx, c.out, { t: c.t + start, dur: 0.02, vol: vol * 0.6, filter: 'bandpass', cutoff: 1800, q: 1.5 });
+}
+
 function crash(c: SfxCtx, start: number, vol: number, dur = 1.2): void {
   noise(c.ctx, c.out, { t: c.t + start, dur, vol, filter: 'highpass', cutoff: 5000, q: 0.5 });
 }
@@ -119,20 +136,37 @@ const recipes: Record<SfxName, Recipe> = {
     return 2.0;
   },
   victory: (c) => {
-    const mel: [number, number, number][] = [
-      [72, 0, 0.14], [76, 0.15, 0.14], [79, 0.3, 0.14], [84, 0.45, 0.3],
-      [83, 0.8, 0.14], [81, 0.95, 0.14], [79, 1.1, 0.14], [81, 1.25, 0.14], [84, 1.45, 0.9],
+    // ORIGINAL ~4 s gospel-blues "victory tag" in C: horn pickup, then a church-style IV - #IVdim - I/V - V7 - I
+    // tag with Hammond-ish organ, horn section hits, a blues lick on top and tambourine on 2 & 4.
+    const beat = 0.3;
+    // horn pickup (sol-la-do)
+    [67, 69, 72].forEach((m, i) => brass(c, i * 0.1, [m, m - 5], 0.09, 0.2));
+    const changes: Array<[number, number[], number, number]> = [
+      // [start beat, chord, bass, beats]
+      [1, [65, 69, 72, 75], 41, 2], // F7
+      [3, [66, 69, 72, 75], 42, 2], // F#dim7
+      [5, [67, 72, 76, 79], 43, 2], // C/G
+      [7, [67, 71, 74, 77], 43, 1], // G7
+      [8, [60, 64, 67, 70, 74], 36, 5], // C9 hold
     ];
-    for (const [m, s, d] of mel) {
-      tone(c.ctx, c.out, { type: 'square', freq: N(m, c.p), t: c.t + s, dur: d, vol: 0.1, shape: 'asr', release: 0.08, vibRate: 6, vibDepth: d > 0.3 ? 18 : 0 });
-      tone(c.ctx, c.out, { type: 'triangle', freq: N(m + 12, c.p), t: c.t + s, dur: d, vol: 0.06, shape: 'asr', release: 0.08 });
+    for (const [b, chord, bass, len] of changes) {
+      const st = b * beat;
+      const dur = len * beat;
+      organ(c, st, chord, dur, 0.1);
+      brass(c, st, chord.slice(-3).map((m) => m + 12), len >= 5 ? dur * 0.8 : Math.min(0.22, dur), len >= 5 ? 0.26 : 0.22);
+      tone(c.ctx, c.out, { type: 'triangle', freq: N(bass, c.p), t: c.t + st, dur: Math.min(dur, 0.9), vol: 0.22, shape: 'asr', release: 0.1 });
     }
-    const bass: [number, number][] = [[48, 0], [55, 0.3], [53, 0.8], [55, 1.1], [48, 1.45]];
-    for (const [m, s] of bass) tone(c.ctx, c.out, { type: 'triangle', freq: N(m, c.p), t: c.t + s, dur: 0.28, vol: 0.22 });
-    brass(c, 1.45, [64, 67, 72], 0.9, 0.24);
-    for (let i = 0; i < 8; i++) noise(c.ctx, c.out, { t: c.t + i * 0.15, dur: 0.05, vol: 0.05, filter: 'highpass', cutoff: 7000 });
-    crash(c, 1.45, 0.12);
-    return 2.6;
+    // blues lick over the G7 into the final chord: b3 - 3 - 5 - 6 - root
+    ([[2.1, 75, 0.1], [2.2, 76, 0.1], [2.3, 79, 0.1], [2.4, 81, 0.12]] as Array<[number, number, number]>).forEach(([s, m, d]) => {
+      tone(c.ctx, c.out, { type: 'square', freq: N(m, c.p), t: c.t + s, dur: d, vol: 0.06, shape: 'asr', release: 0.04, filter: 'lowpass', cutoff: 3000 });
+    });
+    tone(c.ctx, c.out, { type: 'square', freq: N(84, c.p), t: c.t + 2.4, dur: 1.3, vol: 0.06, shape: 'asr', release: 0.3, vibRate: 6, vibDepth: 22, filter: 'lowpass', cutoff: 3200 });
+    // tambourine on the backbeats, then a shake roll over the last chord
+    for (let b = 2; b <= 8; b += 2) tambourine(c, b * beat, 0.07);
+    for (let i = 0; i < 10; i++) tambourine(c, 2.4 + i * 0.07, 0.03 + (i % 2) * 0.015);
+    tambourine(c, 3.2, 0.08);
+    crash(c, 2.4, 0.1, 1.6);
+    return 4.0;
   },
   lose: (c) => {
     // sad trombone: wah-wah-wah-waaah
@@ -346,6 +380,13 @@ const recipes: Record<SfxName, Recipe> = {
       formantVoice(c.ctx, c.out, { t: c.t + 0.15 + i * 0.27, dur: 0.5, vol: 0.12, f0, f0To: f0 * 1.45, f1: 320, f1To: 420, f2: 800, f2To: 950, breath: 0.02, attack: 0.05 });
     }
     return 2.6;
+  },
+  gust: (c) => {
+    // Lake Michigan wind: a swelling band-passed whoosh that sweeps up and away, plus a breathy whistle
+    noise(c.ctx, c.out, { t: c.t, dur: 1.1, vol: 0.22, filter: 'bandpass', cutoff: 280 * c.p, cutoffTo: 1600 * c.p, q: 1.2, attack: 0.25, shape: 'asr', release: 0.35 });
+    noise(c.ctx, c.out, { t: c.t + 0.1, dur: 0.9, vol: 0.08, filter: 'bandpass', cutoff: 1800 * c.p, cutoffTo: 4200 * c.p, q: 3, attack: 0.3, shape: 'asr', release: 0.3 });
+    tone(c.ctx, c.out, { type: 'sine', freq: 820 * c.p, to: 1250 * c.p, t: c.t + 0.15, dur: 0.9, vol: 0.03, attack: 0.3, vibRate: 5, vibDepth: 60 });
+    return 1.5;
   },
   ouch: (c) => {
     formantVoice(c.ctx, c.out, {

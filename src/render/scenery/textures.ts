@@ -497,3 +497,86 @@ export function cityEnvTexture(dusk: boolean): THREE.CanvasTexture {
   t.mapping = THREE.EquirectangularReflectionMapping;
   return t;
 }
+
+/**
+ * Painted Chicago skyline silhouette (filler towers + Willis with its twin antennas, the tapered
+ * X-braced Hancock, a stepped glass spire, the white Aon slab and the Marina City cobs).
+ * `base` is the ground line, `h` the height of the tallest antenna tip.
+ */
+export function drawChicagoSkyline(
+  g: CanvasRenderingContext2D, x: number, base: number, w: number, h: number, rng: Rng,
+  o: { tones?: string[]; dark?: string; glass?: string; windows?: string; filler?: number } = {},
+): void {
+  const u = h / 100;
+  const tones = o.tones ?? ['#6f84a3', '#8597b0', '#a9b9cc', '#7a8aa1', '#c4b393'];
+  const dark = o.dark ?? '#23272f';
+  const win = o.windows ?? 'rgba(255,255,255,0.28)';
+  const rect = (rx: number, ry: number, rw: number, rh: number, col: string, dots = true) => {
+    g.fillStyle = col;
+    g.fillRect(rx, base - ry - rh, rw, rh);
+    if (!dots) return;
+    g.fillStyle = win;
+    for (let yy = base - ry - rh + u * 1.5; yy < base - ry - u; yy += u * 2.2) for (let xx = rx + u * 0.6; xx < rx + rw - u * 0.8; xx += u * 1.4) if (rng.chance(0.55)) g.fillRect(xx, yy, u * 0.6, u * 0.9);
+  };
+  // filler
+  let cx = x;
+  const fill = o.filler ?? 1;
+  while (cx < x + w) {
+    const bw = rng.range(3, 8) * u, bh = rng.range(10, 42) * u * fill;
+    rect(cx, 0, bw, bh, rng.pick(tones));
+    if (rng.chance(0.25)) rect(cx + bw * 0.25, bh, bw * 0.5, u * 3, rng.pick(tones), false);
+    cx += bw + rng.range(-1, 1.2) * u;
+  }
+  const at = (f: number) => x + w * f;
+  // Aon
+  rect(at(0.12), 0, 7 * u, 66 * u, '#e9e6de');
+  // stepped glass spire
+  const gs = o.glass ?? '#8fb2d4';
+  rect(at(0.3), 0, 9 * u, 52 * u, gs);
+  rect(at(0.3) + u, 52 * u, 7 * u, 10 * u, gs);
+  rect(at(0.3) + 2 * u, 62 * u, 5 * u, 7 * u, gs);
+  g.fillStyle = '#d7e3ef';
+  g.fillRect(at(0.3) + 4.2 * u, base - 84 * u, 0.6 * u, 15 * u);
+  // Marina City cobs
+  for (const mx of [at(0.47), at(0.47) + 5.5 * u]) {
+    g.fillStyle = '#e8e4da';
+    g.fillRect(mx, base - 34 * u, 4.4 * u, 34 * u);
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    for (let yy = base - 33 * u; yy < base - 8 * u; yy += 1.6 * u) {
+      g.beginPath();
+      g.ellipse(mx + 2.2 * u, yy, 2.4 * u, 0.5 * u, 0, 0, Math.PI);
+      g.fill();
+    }
+  }
+  // Willis: three stepped bundles + twin antennas
+  const wx = at(0.6);
+  for (const [dx, hh] of [[0, 62], [5, 86], [10, 74], [3, 76]] as Array<[number, number]>) rect(wx + dx * u, 0, 5 * u, hh * u, dark);
+  g.fillStyle = '#e8e8e8';
+  g.fillRect(wx + 6.3 * u, base - 100 * u, 0.6 * u, 14 * u);
+  g.fillRect(wx + 8.3 * u, base - 97 * u, 0.6 * u, 11 * u);
+  // Hancock: tapered with X braces and two antennas
+  const hx = at(0.82), hb = 12 * u, ht = 8 * u, hh = 78 * u;
+  g.fillStyle = dark;
+  g.beginPath();
+  g.moveTo(hx, base);
+  g.lineTo(hx + (hb - ht) / 2, base - hh);
+  g.lineTo(hx + (hb + ht) / 2, base - hh);
+  g.lineTo(hx + hb, base);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = 'rgba(160,170,185,0.55)';
+  g.lineWidth = Math.max(1, u * 0.35);
+  for (let k = 0; k < 5; k++) {
+    const y0 = base - (k * hh) / 5, y1 = base - ((k + 1) * hh) / 5;
+    const inset0 = ((hb - ht) / 2) * (k / 5), inset1 = ((hb - ht) / 2) * ((k + 1) / 5);
+    g.beginPath();
+    g.moveTo(hx + inset0, y0);
+    g.lineTo(hx + hb - inset1, y1);
+    g.moveTo(hx + hb - inset0, y0);
+    g.lineTo(hx + inset1, y1);
+    g.stroke();
+  }
+  g.fillStyle = '#e8e8e8';
+  g.fillRect(hx + hb / 2 - 2 * u, base - 96 * u, 0.6 * u, 18 * u);
+  g.fillRect(hx + hb / 2 + 1.4 * u, base - 96 * u, 0.6 * u, 18 * u);
+}

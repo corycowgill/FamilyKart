@@ -18,7 +18,8 @@ export type ItemId =
   | 'giantDogBone'
   | 'chicagoPothole'
   | 'rocketKart'
-  | 'mysteryBox';
+  | 'mysteryBox'
+  | 'windyGust';
 
 export type SpecialId = 'dadBoost' | 'momShield' | 'turboDrift' | 'lightningDash' | 'puppyPanic' | 'grandmasRevenge';
 
@@ -273,4 +274,6 @@ export type SimEvent =
   | { type: 'respawn'; kart: number }
   | { type: 'overtake'; kart: number; passed: number }
   | { type: 'projectile'; id: number; kind: ProjectileKind; owner: number }
-  | { type: 'drop'; kind: HazardKind; owner: number };
+  | { type: 'drop'; kind: HazardKind; owner: number }
+  /** Windy City Gust used by `kart`: every racer ahead is blown about (each victim also gets a `hit` with cause 'wind'). */
+  | { type: 'gust'; kart: number; victims: number[] };

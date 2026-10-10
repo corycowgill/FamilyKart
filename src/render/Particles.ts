@@ -62,13 +62,13 @@ export class ParticleSystem {
       transparent: true,
       depthWrite: false,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-      uniforms: { map: { value: texture }, scale: { value: 600 }, intensity: { value: intensity } },
+      uniforms: { map: { value: texture }, scale: { value: 600 }, intensity: { value: intensity }, tint: { value: new THREE.Color(1, 1, 1) } },
       vertexShader: `attribute float psize; attribute float palpha; varying vec3 vColor; varying float vAlpha; uniform float scale;
         void main(){ vColor = color; vAlpha = palpha; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = psize * scale / -mv.z; gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `uniform sampler2D map; uniform float intensity; varying vec3 vColor; varying float vAlpha;
+      fragmentShader: `uniform sampler2D map; uniform float intensity; uniform vec3 tint; varying vec3 vColor; varying float vAlpha;
         void main(){ vec4 t = texture2D(map, gl_PointCoord); if (t.a*vAlpha < 0.01) discard;
           // hot white core for additive sparks so they bloom
-          vec3 col = vColor * t.rgb * intensity + vec3(pow(t.a, 4.0) * (intensity - 1.0) * 0.6);
+          vec3 col = (vColor * t.rgb * intensity + vec3(pow(t.a, 4.0) * (intensity - 1.0) * 0.6)) * tint;
           gl_FragColor = vec4(col, t.a * vAlpha);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -290,12 +290,16 @@ export class Effects {
   readonly smoke: ParticleSystem;
   readonly skids: SkidMarks | null = null;
   readonly quality: 'low' | 'medium' | 'high';
+  /** 0 = day .. 1 = night: sparks glow brighter, boosting karts leave light trails */
+  night = 0;
   private tex: THREE.Texture;
+  private glowBase: number;
   constructor(scene: THREE.Scene, quality: 'low' | 'medium' | 'high', readonly theme?: string) {
     this.quality = quality;
     this.tex = makeSoftTexture();
     const n = quality === 'low' ? 1200 : quality === 'medium' ? 2200 : 3000;
-    this.glow = new ParticleSystem(n, true, this.tex, quality === 'low' ? 1 : 1.35);
+    this.glowBase = quality === 'low' ? 1 : 1.35;
+    this.glow = new ParticleSystem(n, true, this.tex, this.glowBase);
     this.smoke = new ParticleSystem(n, false, this.tex);
     scene.add(this.glow.points, this.smoke.points);
     if (quality !== 'low') {
@@ -303,6 +307,13 @@ export class Effects {
       this.skids = new SkidMarks(quality === 'high' ? 1600 : 500, quality === 'high' ? 9 : 4, skidColor, theme === 'snow' ? 0.32 : 0.42);
       scene.add(this.skids.mesh);
     }
+  }
+  /** Time-of-day: additive sparks get a hotter core at night so they bloom against the dark. */
+  setNight(n: number): void {
+    this.night = n;
+    (this.glow.points.material as THREE.ShaderMaterial).uniforms.intensity.value = this.glowBase * (1 + 0.3 * n);
+    // unlit smoke / dust would glow white against the night: tint it into the moonlight
+    (this.smoke.points.material as THREE.ShaderMaterial).uniforms.tint.value.setRGB(1 - 0.62 * n, 1 - 0.56 * n, 1 - 0.4 * n);
   }
   update(dt: number): void {
     this.glow.update(dt);

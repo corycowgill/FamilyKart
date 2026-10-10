@@ -537,3 +537,15 @@ export function trimShadows(root: THREE.Object3D, quality: 'low' | 'medium' | 'h
     if (r < (quality === 'medium' ? 25 : 1e9)) m.castShadow = false;
   });
 }
+
+/**
+ * Time of day the scene is being built for ('day' | 'sunset' | 'night'), read from the nearest
+ * ancestor's userData.timeOfDay (the environment sets it on the scene). Defaults to 'day'.
+ */
+export function timeOfDay(obj: THREE.Object3D | null | undefined): 'day' | 'sunset' | 'night' {
+  for (let o = obj; o; o = o.parent) {
+    const t = o.userData?.timeOfDay;
+    if (t === 'day' || t === 'sunset' || t === 'night') return t;
+  }
+  return 'day';
+}

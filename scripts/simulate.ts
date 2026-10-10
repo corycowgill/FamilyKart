@@ -425,7 +425,7 @@ function main(): void {
   const usedTotal = Object.values(used).reduce((a, b) => a + b, 0);
   const grantedTotal = Object.values(counters.itemsGranted).reduce((a, b) => a + b, 0);
   out.push(`box pickups ${counters.itemPickups} (${perRace(counters.itemPickups)}/race)   items granted ${grantedTotal}   items used ${usedTotal} (${perRace(usedTotal)}/race)`);
-  const itemIds: ItemId[] = ['turboSoda', 'flyingPizza', 'bananaPeel', 'bubbleShield', 'giantDogBone', 'chicagoPothole', 'rocketKart', 'mysteryBox'];
+  const itemIds: ItemId[] = ['turboSoda', 'flyingPizza', 'bananaPeel', 'bubbleShield', 'giantDogBone', 'chicagoPothole', 'rocketKart', 'mysteryBox', 'windyGust'];
   out.push(table(itemIds.map((id) => [id, counters.itemsGranted[id] ?? 0, pct(counters.itemsGranted[id] ?? 0, grantedTotal), used[id] ?? 0, counters.mysteryResults[id] ?? 0]), ['item', 'granted', 'share', 'used', 'from mystery']));
   out.push(`hits ${counters.hits} (${perRace(counters.hits)}/race) by cause ${JSON.stringify(counters.hitsByCause)}   shield blocks ${counters.shieldBlocks}`);
   const specialIds: SpecialId[] = ['dadBoost', 'momShield', 'turboDrift', 'lightningDash', 'puppyPanic', 'grandmasRevenge'];

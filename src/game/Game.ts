@@ -1,4 +1,5 @@
 import { audio } from '../audio/AudioEngine';
+import { setAnnouncerEnabled } from '../audio/announcer';
 import { CHARACTERS, characterById } from '../data/characters';
 import { CUPS, TRACKS, trackById } from '../data/tracks/index';
 import { DEFAULT_KEYS_P1, Input, type Action, type KeyMap } from '../input/Input';
@@ -7,6 +8,9 @@ import { formatTime, Save } from '../persist/Save';
 import { Podium } from '../render/Podium';
 import { Renderer } from '../render/Renderer';
 import { Showroom } from '../render/Showroom';
+import { LIVERIES, liveryById, type LiveryId, type RaceKind } from '../render/models/liveries';
+import { clearLiveries, setLivery } from '../render/models/kartModels';
+import { TIMES_OF_DAY, type TimeOfDay } from '../render/timeOfDay';
 import { AIDriver, AI_DIFFICULTY } from '../sim/ai/AIDriver';
 import type { ItemId } from '../sim/types';
 import type { RacerConfig, RaceResult } from '../sim/race/RaceSim';
@@ -85,6 +89,7 @@ export class Game {
   private players: CharacterId[] = ['dad'];
   private trackId = 'chicago';
   private difficulty: Difficulty;
+  private timeOfDay: TimeOfDay;
   private gp: GPState | null = null;
   private pauseEl: HTMLElement | null = null;
   private debugEl: HTMLElement | null = null;
@@ -103,12 +108,14 @@ export class Game {
     this.input = new Input(window);
     const s = this.save.settings;
     this.difficulty = s.difficulty;
+    this.timeOfDay = (TIMES_OF_DAY as readonly string[]).includes(s.timeOfDay ?? '') ? s.timeOfDay! : 'day';
     this.players = [CHARACTERS.some((c) => c.id === s.lastCharacter) ? s.lastCharacter : 'dad'];
     this.trackId = TRACKS.some((t) => t.id === s.lastTrack) ? s.lastTrack : TRACKS[0].id;
     // phones and tablets start on medium graphics unless the player picked a quality themselves
     if (isTouchDevice() && !s.qualityChosen && s.quality === 'high' && !window.matchMedia?.('(any-pointer: fine)').matches) this.save.updateSettings({ quality: 'medium' });
     this.renderer.setQuality(this.save.settings.quality);
     audio.setVolumes(s.master, s.music, s.sfx);
+    setAnnouncerEnabled(s.announcer ?? true);
     if (s.keys) this.input.setKeyMap(0, { ...DEFAULT_KEYS_P1, ...(s.keys as Partial<KeyMap>) } as KeyMap);
     const params = new URLSearchParams(location.search);
     this.testFlags.laps = Number(params.get('laps') ?? 0);
@@ -208,6 +215,7 @@ export class Game {
   private async startAttract(): Promise<void> {
     if (this.attract) return;
     const racers: RacerConfig[] = CHARACTERS.map((c) => ({ character: c.id, playerIndex: -1 }));
+    this.applyLiveries('all');
     const s = new RaceSession(this.renderer, null, { track: TRACKS[0], racers, difficulty: 'hard', mode: 'attract', seed: 99 });
     await s.load(() => {});
     s.sim.time = 0.01; // skip countdown
@@ -217,6 +225,15 @@ export class Game {
   private stopAttract(): void {
     this.attract?.dispose();
     this.attract = null;
+  }
+
+  /**
+   * Point the kart builder at the save's paint jobs: 'all' = every racer's equipped livery (showroom,
+   * attract), otherwise only the listed (human) racers; everyone else gets factory paint.
+   */
+  private applyLiveries(who: CharacterId[] | 'all'): void {
+    clearLiveries();
+    for (const c of CHARACTERS) if (who === 'all' || who.includes(c.id)) setLivery(c.id, this.save.liveryFor(c.id));
   }
 
   private setStage(stage: Stage): void {
@@ -292,7 +309,7 @@ export class Game {
         this.ctaBtn('Time Trial', 'blue', '⏱️', 'Blue Line', '', () => this.beginMode('timetrial'), 'btn-time-trial'),
         this.ctaBtn('2-Player Versus', 'pink', '🎮', 'Pink Line', '', () => this.beginMode('versus'), 'btn-versus'),
         h('div', { class: 'btn-row' },
-          this.ctaBtn('Garage', 'brown', '🔧', 'Brown Line', 'small', () => this.showGarage(), 'btn-garage'),
+          this.withNewBadge(this.ctaBtn('Garage', 'brown', '🔧', 'Brown Line', 'small', () => this.showGarage(), 'btn-garage')),
           this.ctaBtn('Settings', 'green', '⚙️', 'Green Line', 'small', () => this.showSettings(), 'btn-settings')),
       ),
       h('div', { class: 'corner-stats' }, `Races: ${t.races} · Wins: ${t.wins}`),
@@ -301,6 +318,12 @@ export class Game {
     );
     el.querySelector<HTMLElement>('.menu-list .btn')?.setAttribute('data-autofocus', '');
     this.show('menu', el);
+  }
+
+  /** Garage button gets a "NEW" badge while there are unseen paint jobs. */
+  private withNewBadge(b: HTMLButtonElement): HTMLButtonElement {
+    if (LIVERIES.some((l) => this.save.isNew(l.id))) b.append(h('span', { class: 'new-badge' }, 'NEW'));
+    return b;
   }
 
   private beginMode(mode: Mode): void {
@@ -314,6 +337,7 @@ export class Game {
 
   private showCharacterSelect(playerSlot: number): void {
     if (playerSlot === 0) this.players = [this.players[0] ?? this.save.settings.lastCharacter];
+    this.applyLiveries('all');
     const room = new Showroom(this.renderer);
     this.stopAttract();
     this.setStage(room);
@@ -327,7 +351,7 @@ export class Game {
       const stat = (label: string, v: number) => `<div class="stat"><span>${label}</span><div class="bar">${[1, 2, 3, 4, 5].map((i) => `<div class="pip${i <= v ? ' on' : ''}"></div>`).join('')}</div></div>`;
       info.innerHTML = `<h2 style="color:${d.colors.primary}">${d.name}</h2><div class="title">${d.title}</div><div class="tag">${d.tagline}</div>
         ${stat('Speed', d.stats.speed)}${stat('Acceleration', d.stats.acceleration)}${stat('Handling', d.stats.handling)}${stat('Weight', d.stats.weight)}
-        <div class="special-box"><b>⚡ ${d.special.name}</b>${d.special.description}</div>`;
+        <div class="special-box"><b>⚡ ${d.special.name}</b>${d.special.description}</div>${this.paintTag(current)}`;
       cards.querySelectorAll('.char-card').forEach((c) => c.classList.toggle('selected', (c as HTMLElement).dataset.id === current));
     };
     const confirm = () => {
@@ -415,7 +439,7 @@ export class Game {
       h('div', { class: 'screen-title' }, tt ? 'Time Trial: Pick a Track' : 'Pick a Track'),
       h('div', { class: 'screen-sub' }, tt ? 'Race alone against the clock (and your ghost!)' : `${characterById(this.players[0]).name}${this.players[1] ? ' vs ' + characterById(this.players[1]).name : ''} — pick your neighborhood!`),
     );
-    if (!tt) el.append(this.difficultyPicker());
+    el.append(tt ? h('div', { class: 'options-row' }, ...this.todPicker()) : this.difficultyPicker());
     el.append(grid, h('div', { class: 'options-row' }, this.btn('Back', 'gray small', () => this.showCharacterSelect(this.mode === 'versus' ? 1 : 0), 'btn-back')));
     this.show('track', el);
     (grid.querySelector('.selected') as HTMLElement | null)?.focus({ preventScroll: true });
@@ -425,7 +449,7 @@ export class Game {
     const seg = h('div', { class: 'seg' });
     const labels: Record<Difficulty, string> = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
     (['easy', 'normal', 'hard'] as Difficulty[]).forEach((d) => {
-      const b = h('button', { class: d === this.difficulty ? 'on' : '', 'data-testid': `diff-${d}` }, labels[d]);
+      const b = h('button', { class: d === this.difficulty ? 'on' : '', 'data-testid': `diff-${d}`, 'data-nav': true }, labels[d]);
       b.addEventListener('click', () => {
         this.difficulty = d;
         this.save.updateSettings({ difficulty: d });
@@ -437,7 +461,29 @@ export class Game {
     const assist = h('label', { class: 'label', style: 'display:flex;gap:8px;align-items:center;cursor:pointer' },
       h('input', { type: 'checkbox', checked: this.save.settings.steeringAssist, 'data-testid': 'assist' }), 'Steering assist');
     assist.querySelector('input')!.addEventListener('change', (e) => this.save.updateSettings({ steeringAssist: (e.target as HTMLInputElement).checked }));
-    return h('div', { class: 'options-row' }, h('span', { class: 'label' }, 'Difficulty'), seg, assist);
+    return h('div', { class: 'options-row' }, h('span', { class: 'label' }, 'Difficulty'), seg, ...this.todPicker(), assist);
+  }
+
+  /** "☀️ Day / 🌇 Sunset / 🌙 Night" segmented control (label + seg), persisted in settings. */
+  private todPicker(): HTMLElement[] {
+    const seg = h('div', { class: 'seg tod-seg', role: 'group', 'aria-label': 'Time of day' });
+    const opts: Record<TimeOfDay, [string, string]> = { day: ['☀️', 'Day'], sunset: ['🌇', 'Sunset'], night: ['🌙', 'Night'] };
+    for (const t of TIMES_OF_DAY) {
+      const [icon, label] = opts[t];
+      const b = h('button', { class: t === this.timeOfDay ? 'on' : '', 'data-testid': `tod-${t}`, 'data-nav': true, 'aria-pressed': String(t === this.timeOfDay), 'aria-label': label, title: label },
+        h('span', { class: 'tod-ico' }, icon), h('span', { class: 'tod-txt' }, label));
+      b.addEventListener('click', () => {
+        this.timeOfDay = t;
+        this.save.updateSettings({ timeOfDay: t });
+        seg.querySelectorAll('button').forEach((x) => {
+          x.classList.toggle('on', x === b);
+          x.setAttribute('aria-pressed', String(x === b));
+        });
+        audio.play('menuMove');
+      });
+      seg.append(b);
+    }
+    return [h('span', { class: 'label tod-label' }, 'Time'), seg];
   }
 
   /* ------------------------------------------------------------------ grand prix */
@@ -496,9 +542,11 @@ export class Game {
     this.disposeSession();
     await new Promise((r) => setTimeout(r, 30));
     const ghost = tt ? this.save.ghost(def.id) : undefined;
+    // human racers drive their equipped paint job, the AI family keeps factory paint
+    this.applyLiveries(racers.filter((r) => r.playerIndex >= 0).map((r) => r.character));
     const session = new RaceSession(this.renderer, this.input, {
       track: raceDef, racers, difficulty: this.difficulty, mode: tt ? 'timeTrial' : 'race', ghost,
-      steeringAssist: [this.save.settings.steeringAssist, false],
+      steeringAssist: [this.save.settings.steeringAssist, false], timeOfDay: this.timeOfDay,
     });
     this.input.setSplitScreen(this.mode === 'versus');
     await session.load((p) => (bar.style.width = `${p * 100}%`));
@@ -558,11 +606,16 @@ export class Game {
     const def = s.opts.track;
     const tt = this.mode === 'timetrial';
     const records: string[] = [];
+    const unlocked: LiveryId[] = [];
     for (const r of results.filter((x) => x.isHuman)) {
       const counts = !this.testFlags.laps && r.finished;
       const res = this.save.submitRace(def.id, r.character, tt ? 1 : r.place, r.time, r.bestLap, counts);
       if (res.newBestLap) records.push(`New best lap ${formatTime(r.bestLap)}!`);
       if (res.newBestRace) records.push(`New track record ${formatTime(r.time)}!`);
+      const kind: RaceKind = this.gp ? 'grandprix' : this.mode;
+      for (const id of this.save.unlockFromRace({ trackId: def.id, mode: kind, place: r.place, finished: r.finished, timeOfDay: s.timeOfDay, newRecord: res.newBestRace })) {
+        if (!unlocked.includes(id)) unlocked.push(id);
+      }
     }
     if (tt && s.players[0]?.finished && !this.testFlags.laps) {
       const k = s.players[0];
@@ -578,11 +631,37 @@ export class Game {
     const top = results.slice(0, 3).map((r) => r.character);
     const human = results.find((r) => r.isHuman);
     if (human) audio.play(human.place <= 3 ? 'victory' : 'lose');
+    this.applyLiveries(results.filter((r) => r.isHuman).map((r) => r.character));
     this.setStage(new Podium(this.renderer, tt ? [human!.character] : top));
-    this.showResults(results, sessionDef, records);
+    this.showResults(results, sessionDef, records, unlocked);
   }
 
-  private showResults(results: RaceResult[], def: TrackDef, records: string[]): void {
+  /** "New paint job unlocked!" cards on the results / standings screens. */
+  private unlockToasts(ids: LiveryId[]): HTMLElement | null {
+    if (!ids.length) return null;
+    audio.play('menuSelect');
+    return h('div', { class: 'unlock-toasts', 'data-testid': 'unlock-toast' }, ...ids.map((id, i) => {
+      const l = liveryById(id);
+      return h('div', { class: 'unlock-toast', style: `animation-delay:${0.6 + i * 0.35}s` },
+        h('span', { class: 'swatch-chip', style: this.swatchStyle(l.swatch) }, l.icon),
+        h('span', { class: 'ut-text' }, h('b', {}, `🎉 New paint job unlocked: ${l.name}!`), h('small', {}, 'Paint any kart with it in the Garage')));
+    }));
+  }
+
+  private swatchStyle(c: [string, string, string]): string {
+    return `--sw-a:${c[0]};--sw-b:${c[1]};--sw-c:${c[2]}`;
+  }
+
+  /** Little "paint job" line for the character info panel. */
+  private paintTag(id: CharacterId): string {
+    const liv = this.save.liveryFor(id);
+    const l = liv ? liveryById(liv) : null;
+    const c = characterById(id).colors;
+    const sw = l ? l.swatch : [c.primary, c.secondary, c.accent];
+    return `<div class="paint-tag"><span class="swatch-chip" style="${this.swatchStyle(sw as [string, string, string])}">${l ? l.icon : ''}</span>Paint: <b>${esc(l ? l.name : 'Factory')}</b></div>`;
+  }
+
+  private showResults(results: RaceResult[], def: TrackDef, records: string[], unlocked: LiveryId[] = []): void {
     const tt = this.mode === 'timetrial';
     const table = h('table', { 'data-testid': 'results-table' });
     const best = Math.min(...results.map((r) => r.bestLap));
@@ -614,7 +693,7 @@ export class Game {
     panel.append(row);
     const humanWon = results.some((r) => r.isHuman && r.place === 1);
     const tag = tt ? 'New stop on the clock!' : humanWon ? 'Sweet win, Chicago!' : results.some((r) => r.isHuman && r.place <= 3) ? 'Chicago proud — podium!' : 'Next train: a rematch!';
-    const el = h('div', { class: 'pass-through' }, h('div', { html: confettiHtml(humanWon || tt ? 28 : 14) }), panel,
+    const el = h('div', { class: 'pass-through' }, h('div', { html: confettiHtml(humanWon || tt ? 28 : 14) }), panel, this.unlockToasts(unlocked),
       h('div', { class: 'winner-banner', html: `${esc(tt ? formatTime(winner.time) : `${characterById(winner.character).name} wins!`)}<small>${starSvg('chi-star', '#fff')} ${tag}</small>` }));
     this.show('results', el);
   }
@@ -634,9 +713,12 @@ export class Game {
     const panel = h('div', { class: 'results panel' },
       h('h2', { class: 'marquee' }, last ? `${gp.cup.name} Champion!` : `Standings after ${gp.race + 1}/4`), table);
     const row = h('div', { class: 'btn-row' });
+    let cupUnlocks: LiveryId[] = [];
     if (last) {
       const place = standings.indexOf(this.players[0]) + 1;
       this.save.submitCup(gp.cup.id, place, this.difficulty);
+      cupUnlocks = this.save.unlockFromCup({ cupId: gp.cup.id, place });
+      this.applyLiveries([this.players[0]]);
       this.setStage(new Podium(this.renderer, standings.slice(0, 3), standings.slice(3)));
       audio.play(place <= 3 ? 'victory' : 'lose');
       row.append(this.btn('Main Menu', 'green', () => {
@@ -654,7 +736,7 @@ export class Game {
       }));
     }
     panel.append(row);
-    this.show('standings', h('div', { class: 'pass-through' }, last ? h('div', { html: confettiHtml(28) }) : null, panel,
+    this.show('standings', h('div', { class: 'pass-through' }, last ? h('div', { html: confettiHtml(28) }) : null, panel, this.unlockToasts(cupUnlocks),
       last ? h('div', { class: 'winner-banner', html: `🏆 ${esc(characterById(standings[0]).name)}<small>${starSvg('chi-star', '#fff')} Champion of Chicagoland!</small>` }) : null));
   }
 
@@ -690,38 +772,96 @@ export class Game {
   /* ------------------------------------------------------------------ garage */
 
   private showGarage(): void {
+    this.applyLiveries('all');
     const room = new Showroom(this.renderer);
     this.stopAttract();
     this.setStage(room);
     let current: CharacterId = this.players[0];
-    const info = h('div', { class: 'char-info panel' });
+    /** Livery shown on the turntable (may be a locked one being previewed); undefined = the equipped one. */
+    let preview: LiveryId | null | undefined;
+    // NEW badges are shown on this visit, then count as seen
+    const fresh = new Set(LIVERIES.filter((l) => this.save.isNew(l.id)).map((l) => l.id));
+    this.save.markSeen([...fresh]);
+    const info = h('div', { class: 'char-info panel garage-paint', 'data-testid': 'garage-paint' });
+    const head = h('div', { class: 'gp-head' });
+    const swatches = h('div', { class: 'swatches', role: 'listbox', 'aria-label': 'Paint jobs' });
+    const desc = h('div', { class: 'livery-desc', 'data-testid': 'livery-desc' });
+    info.append(head, h('div', { class: 'gp-label' }, '🎨 Paint Shop'), swatches, desc);
     const cards = h('div', { class: 'char-cards' });
     const recs = h('div', { class: 'panel garage-recs', style: 'position:fixed;right:3vw;top:18vh;width:min(340px,30vw);font-weight:700' });
+    const owned = () => LIVERIES.filter((l) => this.save.isUnlocked(l.id)).length;
+    const showKart = (liv: LiveryId | null) => {
+      setLivery(current, liv);
+      room.refreshKart(current);
+    };
     const refresh = () => {
       room.select(current);
       const d = characterById(current);
-      info.innerHTML = `<h2 style="color:${d.colors.primary}">${d.name}</h2><div class="title">${d.title}</div><div class="tag">${d.tagline}</div>
-        <div class="special-box"><b>⚡ ${d.special.name}</b>${d.special.description}<br><small>Cooldown ${d.special.cooldown}s</small></div>`;
+      const equipped = this.save.liveryFor(current);
+      const shown = preview === undefined ? equipped : preview;
+      head.innerHTML = `<h2 style="color:${d.colors.primary}">${d.name}</h2><div class="title">${d.title}</div>`;
+      swatches.querySelectorAll<HTMLElement>('.swatch').forEach((b) => {
+        const id = (b.dataset.livery === 'factory' ? null : b.dataset.livery) as LiveryId | null;
+        b.classList.toggle('equipped', id === equipped);
+        b.classList.toggle('selected', id === shown);
+        b.setAttribute('aria-selected', String(id === shown));
+        if (!id) b.style.cssText = this.swatchStyle([d.colors.primary, d.colors.secondary, d.colors.accent]);
+      });
+      const l = shown ? liveryById(shown) : null;
+      const locked = !!shown && !this.save.isUnlocked(shown);
+      desc.innerHTML = `<div class="ld-name">${l ? `${l.icon} ${esc(l.name)}` : '🏁 Factory paint'}</div>
+        <div class="ld-text">${l ? esc(l.description) : `${esc(d.name)}'s own colours, fresh from the factory.`}</div>
+        <div class="ld-status ${locked ? 'locked' : shown === equipped ? 'on' : ''}">${locked ? `🔒 Locked — ${esc(l!.hint)}` : shown === equipped ? '✓ Equipped' : 'Tap to paint'}</div>
+        <div class="ld-count">${owned()} / ${LIVERIES.length} paint jobs unlocked</div>`;
       cards.querySelectorAll('.char-card').forEach((c) => c.classList.toggle('selected', (c as HTMLElement).dataset.id === current));
     };
+    const pick = (id: LiveryId | null) => {
+      if (id && !this.save.isUnlocked(id)) {
+        // locked: preview it on the turntable but keep the equipped paint
+        audio.play('menuBack', { volume: 0.6 });
+        preview = id;
+      } else {
+        this.save.chooseLivery(current, id);
+        audio.play('menuSelect');
+        preview = undefined;
+      }
+      showKart(preview === undefined ? this.save.liveryFor(current) : preview);
+      refresh();
+    };
+    const swatch = (id: LiveryId | null) => {
+      const l = id ? liveryById(id) : null;
+      const locked = !!id && !this.save.isUnlocked(id);
+      const b = h('button', {
+        class: `swatch${locked ? ' locked' : ''}`, 'data-nav': true, 'data-livery': id ?? 'factory', 'data-testid': `livery-${id ?? 'factory'}`,
+        role: 'option', title: l ? `${l.name}${locked ? ` (locked: ${l.hint})` : ''}` : 'Factory paint', style: l ? this.swatchStyle(l.swatch) : '',
+      }, h('span', { class: 'sw-ico' }, locked ? '🔒' : l ? l.icon : '🏁'));
+      if (id && fresh.has(id)) b.append(h('span', { class: 'new-badge' }, 'NEW'));
+      b.addEventListener('click', () => pick(id));
+      return b;
+    };
+    swatches.append(swatch(null), ...LIVERIES.map((l) => swatch(l.id)));
     recs.innerHTML = `<div class="label" style="margin-bottom:6px">🏆 Records</div>` + TRACKS.map((t) => {
       const r = this.save.data.records[t.id];
       return `<div style="margin:6px 0"><div>${t.name}</div><small>Lap ${formatTime(r?.bestLap)} ${r?.bestLapBy ? '(' + characterById(r.bestLapBy).name + ')' : ''} · Race ${formatTime(r?.bestRace)} · Wins ${r?.wins ?? 0}</small></div>`;
     }).join('') + CUPS.map((c) => `<div><small>${c.name}: ${this.save.data.cups[c.id] ? 'Best ' + this.save.data.cups[c.id].bestPlace + ordinal(this.save.data.cups[c.id].bestPlace) : '—'}</small></div>`).join('');
     for (const c of CHARACTERS) {
-      const card = h('button', { class: 'char-card', 'data-id': c.id, 'data-nav': true }, h('img', { src: this.portraits.get(c.id), alt: c.name }), c.name);
+      const card = h('button', { class: 'char-card', 'data-id': c.id, 'data-nav': true, 'data-testid': `garage-${c.id}` }, h('img', { src: this.portraits.get(c.id), alt: c.name }), c.name);
       card.addEventListener('click', () => {
+        if (current === c.id) return;
+        if (preview !== undefined) showKart(this.save.liveryFor(current)); // drop an unsaved preview
+        preview = undefined;
         current = c.id;
         audio.play(c.id === 'lupin' ? 'bark' : 'menuMove');
         refresh();
       });
       cards.append(card);
     }
-    this.show('garage', h('div', { class: 'char-screen' },
-      h('div', { class: 'char-top' }, h('div', { class: 'screen-title' }, 'The Family Garage'), h('div', { class: 'screen-sub' }, 'Drag to spin the karts · built tough for Chicago potholes')),
+    this.show('garage', h('div', { class: 'char-screen garage-screen' },
+      h('div', { class: 'char-top' }, h('div', { class: 'screen-title' }, 'The Family Garage'), h('div', { class: 'screen-sub' }, 'Pick a racer, then a Chicago paint job · drag to spin the kart')),
       info, recs,
       h('div', {}, cards, h('div', { class: 'btn-row' }, this.btn('Back', 'gray small', () => this.backToMenu(), 'btn-back')))));
     refresh();
+    (swatches.querySelector('.swatch.selected') as HTMLElement | null)?.focus({ preventScroll: true });
   }
 
   /* ------------------------------------------------------------------ settings */
@@ -741,8 +881,8 @@ export class Game {
       this.save.updateSettings({ quality: quality.value as 'low' | 'medium' | 'high', qualityChosen: true });
       this.renderer.setQuality(this.save.settings.quality);
     });
-    const check = (label: string, key: 'steeringAssist' | 'showFps', after?: () => void) => {
-      const c = h('input', { type: 'checkbox', checked: s[key] });
+    const check = (label: string, key: 'steeringAssist' | 'showFps' | 'announcer', after?: () => void) => {
+      const c = h('input', { type: 'checkbox', checked: s[key] ?? true });
       c.addEventListener('change', () => {
         this.save.updateSettings({ [key]: c.checked });
         after?.();
@@ -785,6 +925,7 @@ export class Game {
         h('div', { class: 'row' }, h('span', {}, 'Graphics quality'), quality),
         check('Steering assist (younger racers)', 'steeringAssist'),
         check('Show FPS', 'showFps', () => this.updateFpsVisibility()),
+        check('Race announcer voice', 'announcer', () => setAnnouncerEnabled(this.save.settings.announcer !== false)),
         isTouchDevice() ? this.touchSettings() : null,
         h('div', { class: 'kb-section' }, h('h3', {}, 'Controls (Player 1)'), keys, resetKeys),
         h('div', { style: 'font-size:13px;opacity:0.8;margin-top:8px' }, 'Xbox controller: RT gas · LT brake · Left stick / D-pad steer · RB or LB drift · Ⓐ item · Ⓧ special · Ⓨ look back · ☰ Menu pause · Ⓑ back. In 2-player, one controller goes to Player 2 (Player 1 uses the keyboard); with two controllers each player gets one. Press ` (backquote) for debug mode.'),
@@ -866,9 +1007,9 @@ export class Game {
   /** Developer shortcuts while debug mode is on: 1-8 grant items, R restart, N next character, K autopilot. */
   private debugKey(e: KeyboardEvent): void {
     const s = this.session!;
-    const items: ItemId[] = ['turboSoda', 'flyingPizza', 'bananaPeel', 'bubbleShield', 'giantDogBone', 'chicagoPothole', 'rocketKart', 'mysteryBox'];
+    const items: ItemId[] = ['turboSoda', 'flyingPizza', 'bananaPeel', 'bubbleShield', 'giantDogBone', 'chicagoPothole', 'rocketKart', 'mysteryBox', 'windyGust'];
     const n = Number(e.key);
-    if (n >= 1 && n <= 8 && s.players[0]) {
+    if (n >= 1 && n <= 9 && s.players[0]) {
       s.players[0].item = items[n - 1];
       s.players[0].itemRoulette = 0;
     }

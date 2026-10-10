@@ -16,6 +16,8 @@ export const ITEM_TUNING = {
   boneSpeed: 38,
   hazardLife: 40,
   potholeLife: 14,
+  /** Windy City Gust: speed x`speedMul` spread over `duration` s, sideways shove (m/s) toward the outside. */
+  gust: { duration: 0.6, speedMul: 0.65, shove: 5, invuln: 0.8 },
 };
 
 /** Item boxes, inventory, projectiles, dropped hazards and signature specials. */
@@ -23,6 +25,8 @@ export class ItemSystem {
   boxes: ItemBox[] = [];
   projectiles: Projectile[] = [];
   hazards: DroppedHazard[] = [];
+  /** Seconds left of the "blown by the Windy City Gust" state, per kart id (renderer/UI may read it). */
+  readonly blown: number[] = [];
   private nextId = 1;
 
   constructor(private sim: RaceSim) {
@@ -57,6 +61,15 @@ export class ItemSystem {
         }
       }
       if (k.specialCooldown > 0) k.specialCooldown = Math.max(0, k.specialCooldown - dt);
+      const b = this.blown[k.id] ?? 0;
+      if (b > 0) {
+        // gradual slowdown: the product over the whole gust is ITEM_TUNING.gust.speedMul
+        const step = Math.min(dt, b);
+        const f = Math.pow(ITEM_TUNING.gust.speedMul, step / ITEM_TUNING.gust.duration);
+        k.vel.x *= f;
+        k.vel.z *= f;
+        this.blown[k.id] = Math.max(0, b - dt);
+      }
     }
     this.stepProjectiles(dt);
     this.stepHazards(dt);
@@ -108,8 +121,11 @@ export class ItemSystem {
       case 'chicagoPothole':
         this.drop(k, 'pothole', 2.0, ITEM_TUNING.potholeLife);
         break;
+      case 'windyGust':
+        this.gust(k);
+        break;
       case 'mysteryBox': {
-        const options: ItemId[] = ['turboSoda', 'flyingPizza', 'bananaPeel', 'bubbleShield', 'giantDogBone', 'chicagoPothole', 'rocketKart'];
+        const options: ItemId[] = ['turboSoda', 'flyingPizza', 'bananaPeel', 'bubbleShield', 'giantDogBone', 'chicagoPothole', 'rocketKart', 'windyGust'];
         const next = this.sim.rng.pick(options);
         this.sim.events.push({ type: 'itemGranted', kart: k.id, item: next });
         this.activate(k, next);
@@ -168,6 +184,45 @@ export class ItemSystem {
         this.launch(k, 'pie', this.targetAhead(k));
         break;
     }
+  }
+
+  /** Seconds left of kart `id`'s "blown" state (0 when not blown). */
+  blownTime(id: number): number {
+    return this.blown[id] ?? 0;
+  }
+
+  /**
+   * Windy City Gust: every racer AHEAD of `k` in race order is slowed (not spun out), shoved toward the outside
+   * of the road and briefly "blown". Shields deflect it (without popping), rockets and invulnerability ignore it,
+   * and victims get a short invulnerability window so gusts cannot stun-lock.
+   */
+  private gust(k: KartState): void {
+    const sim = this.sim;
+    const G = ITEM_TUNING.gust;
+    const victims: number[] = [];
+    for (const o of sim.karts) {
+      if (o === k || o.finished || o.respawnTime > 0) continue;
+      if (o.raceDistance <= k.raceDistance) continue; // only racers ahead
+      if (o.shieldTime > 0) {
+        // the bubble deflects the wind (and, being only a breeze, the gust does not pop it)
+        sim.events.push({ type: 'shieldBlock', kart: o.id });
+        continue;
+      }
+      if (o.invulnTime > 0 || o.rocketTime > 0) continue;
+      const smp = sim.track.sampleAt(0, o.mainS);
+      // outside of the road: the side the kart is already on, or the outside of the bend when centred
+      const side = Math.abs(o.lateral) > 1 ? Math.sign(o.lateral) : smp.curvature > 0 ? -1 : 1;
+      o.vel.x += smp.nx * side * G.shove;
+      o.vel.z += smp.nz * side * G.shove;
+      o.invulnTime = Math.max(o.invulnTime, G.invuln);
+      this.blown[o.id] = G.duration;
+      o.stats.hitsTaken++;
+      o.reaction = 'hit';
+      o.reactionTime = 0.6;
+      victims.push(o.id);
+    }
+    sim.events.push({ type: 'gust', kart: k.id, victims });
+    for (const id of victims) sim.events.push({ type: 'hit', kart: id, by: k.id, cause: 'wind' });
   }
 
   /** Nearest racer ahead in race order (or the leader if none). */

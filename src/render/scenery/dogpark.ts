@@ -1,10 +1,15 @@
+import { countScenery } from './__count_tmp'; // TEMPCOUNT
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
 import type { TrackSample } from '../../sim/track/Track';
 import type { SceneryContext, SceneryHandle } from './types';
-import { addClouds, Batch, ctxBits, disposeGroup, M, mergeColored, PROPS, setInstance, vcMat } from './common';
+import { addClouds, Batch, boxUV, ctxBits, disposeGroup, M, mergeColored, PROPS, setInstance, trimShadows, vcMat } from './common';
 import { getField } from './field';
-import { canvasTexture, textTexture } from './textures';
+import { canvasTexture, noiseTexture, textTexture } from './textures';
+import {
+  aonCenter, buildChicagoFlag, CTA, elevatedL, buildLakeMichigan, dogGeo, dogMat, type DogBreed, faceRoad, findSpot, glassSpireTower, hancockCenter, hazeObject, hotDogStand,
+  Kit, kites, lifeguardGeo, lighthouse, marinaCity, parkDistrictSign, seagulls, tribuneTower, wavyTower, willisTower,
+} from './chicagoLandmarks';
 
 type P = Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>;
 
@@ -43,23 +48,6 @@ function barkTexture(): THREE.CanvasTexture {
   });
 }
 
-/** A simple cartoon dog (+Z forward), body tinted by instance color. */
-function dogGeometry(): THREE.BufferGeometry {
-  return mergeColored([
-    [new THREE.CapsuleGeometry(0.55, 1.3, 4, 8).rotateX(Math.PI / 2), '#ffffff', M.t(0, 1.1, 0)],
-    [new THREE.SphereGeometry(0.55, 10, 8), '#ffffff', M.t(0, 1.75, 1.05)],
-    [new THREE.SphereGeometry(0.28, 8, 6), '#ffffff', M.t(0, 1.6, 1.55)],
-    [new THREE.SphereGeometry(0.12, 6, 4), '#222', M.t(0, 1.66, 1.82)],
-    [new THREE.SphereGeometry(0.28, 8, 6), '#ffffff', M.trs(0.42, 1.8, 0.95, 0, 0, 0.6, 0.6, 1.2, 0.5)],
-    [new THREE.SphereGeometry(0.28, 8, 6), '#ffffff', M.trs(-0.42, 1.8, 0.95, 0, 0, -0.6, 0.6, 1.2, 0.5)],
-    [new THREE.SphereGeometry(0.08, 6, 4), '#111', M.t(0.2, 1.9, 1.48)],
-    [new THREE.SphereGeometry(0.08, 6, 4), '#111', M.t(-0.2, 1.9, 1.48)],
-    ...[[-0.3, 0.55], [0.3, 0.55], [-0.3, -0.55], [0.3, -0.55]].map(([x, z]) => [new THREE.CylinderGeometry(0.15, 0.13, 0.8, 6), '#ffffff', M.t(x, 0.4, z)] as [THREE.BufferGeometry, string, THREE.Matrix4]),
-    [new THREE.CylinderGeometry(0.08, 0.12, 0.8, 6), '#ffffff', M.trs(0, 1.5, -1.0, -0.8, 0, 0)],
-    [new THREE.TorusGeometry(0.42, 0.08, 6, 12).rotateX(Math.PI / 2), '#e8443a', M.trs(0, 1.45, 0.75, 0.5, 0, 0)],
-  ]);
-}
-
 export function buildDogPark(ctx: SceneryContext): SceneryHandle {
   const { track, group, quality } = ctx;
   const { bag, density, placer } = ctxBits(ctx);
@@ -71,6 +59,15 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
   const vc = vcMat(bag, { roughness: 0.7 });
   const b = field.bounds;
   const parts: P = [];
+  const kit = new Kit(bag, group, { lit: 0, snow: false, quality });
+  const hi = quality === 'high', lo = quality === 'low';
+  const shoreX = field.shoreX;
+  const beach = Number.isFinite(shoreX);
+  const beachW = field.beachW || 50;
+  /** inland edge of the sand */
+  const sandX = shoreX - beachW - 12;
+  const onBeach = (x: number) => beach && x > sandX - 8;
+  const shirt = ['#e8443a', '#2f7de1', '#ffd23f', '#3ccf6e', '#ffffff', '#ff8a3d', '#b05cf0', '#41B6E6', '#14315e', '#ff5fa2'];
   const nearestMain = (x: number, z: number): TrackSample => {
     let best = track.paths[0].samples[0], bd = Infinity;
     for (const s of track.paths[0].samples) {
@@ -190,7 +187,7 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
       houses.add(d.x, field.height(d.x, d.z), d.z, d.rot ?? 0, 1.3, 1.3, 1.3, cols[i % cols.length]);
       placer.reserve(d.x, d.z, 7);
     });
-    for (const s of placer.scatter(Math.round(6 * density), { minX: b.minX - 60, maxX: b.maxX + 60, minZ: b.minZ - 60, maxZ: b.maxZ + 60 }, 5, 6)) houses.add(s.x, s.y, s.z, s.yaw, 1.1, 1.1, 1.1, rng.pick(cols));
+    for (const s of placer.scatter(Math.round(6 * density), { minX: b.minX - 60, maxX: b.maxX + 60, minZ: b.minZ - 60, maxZ: b.maxZ + 60 }, 5, 6)) if (!onBeach(s.x)) houses.add(s.x, s.y, s.z, s.yaw, 1.1, 1.1, 1.1, rng.pick(cols));
     houses.build(group);
     // name sign over the first dog house
     const d0 = lm('dogHouse')[0];
@@ -315,6 +312,7 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
     const treeB = new Batch(bag.add(PROPS.roundTree('#2f9a52', '#5cc06a', '#6b4425')), vc);
     const pines = new Batch(bag.add(PROPS.coneTree('#2e8f55', '#6b4a2b')), vc);
     for (const s of placer.scatter(Math.round(300 * density), rect, 3.2, 4)) {
+      if (onBeach(s.x + 10)) continue;
       const r = rng.next();
       (r < 0.4 ? treeA : r < 0.75 ? treeB : pines).add(s.x, s.y - 0.2, s.z, s.yaw, rng.range(0.9, 1.6));
     }
@@ -322,7 +320,7 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
     treeB.build(group);
     pines.build(group);
     const bushes = new Batch(bag.add(PROPS.bush('#4c9c3c', '#77c257')), vc, { cast: false });
-    for (const s of placer.scatter(Math.round(200 * density), rect, 1.4, 1.5)) bushes.add(s.x, s.y - 0.1, s.z, s.yaw, rng.range(0.7, 1.5));
+    for (const s of placer.scatter(Math.round(200 * density), rect, 1.4, 1.5)) if (!onBeach(s.x)) bushes.add(s.x, s.y - 0.1, s.z, s.yaw, rng.range(0.7, 1.5));
     bushes.build(group);
     const flowerGeo = bag.add(mergeColored([
       [new THREE.CylinderGeometry(0.05, 0.05, 0.8, 4), '#3f8f3a', M.t(0, 0.4, 0)],
@@ -334,7 +332,7 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
     ]));
     const flowers = new Batch(flowerGeo, vc, { cast: false });
     for (const s of placer.scatter(Math.round(500 * density), { minX: b.minX - 60, maxX: b.maxX + 60, minZ: b.minZ - 60, maxZ: b.maxZ + 60 }, 0.6, 0.8, Infinity, 6, false)) {
-      if (field.channelAt(s.x, s.z)) continue;
+      if (field.channelAt(s.x, s.z) || onBeach(s.x)) continue;
       flowers.add(s.x, s.y, s.z, s.yaw, rng.range(1.5, 2.5), rng.range(1.5, 2.5), rng.range(1.5, 2.5), rng.pick(['#ff6fa8', '#ffd23f', '#ffffff', '#b48cff', '#ff8a3d']));
     }
     flowers.build(group);
@@ -374,47 +372,103 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
     benches.build(group);
   }
 
-  /* ------------------------------------------------ dogs playing in the meadows */
+  /* ------------------------------------------------ dogs of many breeds: playing in the meadows, fetching in the lake */
   {
-    const dogGeo = bag.add(dogGeometry());
-    const N = Math.round(10 * density + 2);
-    const dogs = new THREE.InstancedMesh(dogGeo, vc, N);
-    dogs.castShadow = true;
-    const cols = ['#f3e3c3', '#6b4424', '#222222', '#d9a066', '#ffffff', '#9a7b5a', '#c96f4a'];
-    const dd: Array<{ cx: number; cz: number; r: number; w: number; ph: number }> = [];
+    const breeds: DogBreed[] = ['lab', 'doodle', 'dachshund', 'husky', 'corgi'];
+    const coat: Record<DogBreed, string[]> = {
+      lab: ['#e8c27a', '#2a2a2a', '#6b4424', '#f3dca8'],
+      doodle: ['#f3e3c3', '#d9a066', '#fffaf0', '#8a6a4a'],
+      dachshund: ['#8a4a22', '#3a2416', '#b5652f'],
+      husky: ['#8a8f99', '#4a4f57', '#c9ccd2'],
+      corgi: ['#e08a3c', '#c96f2a'],
+    };
+    type Dog = { breed: DogBreed; col: string; s: number; ph: number; mode: 0 | 1; cx: number; cz: number; r: number; w: number; ax: number; az: number; bx: number; bz: number; v: number };
+    const dd: Dog[] = [];
     const rect = { minX: b.minX - 30, maxX: b.maxX + 30, minZ: b.minZ - 30, maxZ: b.maxZ + 30 };
-    for (const s of placer.scatter(N, rect, 9, 6)) dd.push({ cx: s.x, cz: s.z, r: rng.range(4, 8), w: rng.range(0.6, 1.2) * (rng.chance(0.5) ? 1 : -1), ph: rng.next() * 6 });
-    dd.forEach((_, i) => dogs.setColorAt(i, new THREE.Color(cols[i % cols.length])));
-    dogs.count = dd.length;
-    dogs.frustumCulled = false;
-    group.add(dogs);
+    let bi = 0;
+    const nextBreed = () => breeds[bi++ % breeds.length];
+    for (const sp of placer.scatter(Math.round(12 * density + 3), rect, 9, 6)) {
+      if (onBeach(sp.x)) continue;
+      const br = nextBreed();
+      dd.push({ breed: br, col: rng.pick(coat[br]), s: rng.range(1.2, 1.5), ph: rng.next() * 6, mode: 0, cx: sp.x, cz: sp.z, r: rng.range(4, 8), w: rng.range(0.6, 1.2) * (rng.chance(0.5) ? 1 : -1), ax: 0, az: 0, bx: 0, bz: 0, v: 0 });
+    }
+    if (beach) {
+      // fetch runs: from the dry sand out into Lake Michigan and back
+      const nb = hi ? 16 : lo ? 6 : 10;
+      for (let i = 0; i < nb; i++) {
+        const z = rng.range(b.minZ - 60, b.maxZ + 60);
+        const ax = shoreX - rng.range(12, beachW * 0.7);
+        if (!placer.ok(ax, z, 2, 6)) continue;
+        const br = nextBreed();
+        dd.push({ breed: br, col: rng.pick(coat[br]), s: rng.range(1.0, 1.25), ph: rng.next() * 6, mode: 1, cx: 0, cz: 0, r: 0, w: 0, ax, az: z, bx: shoreX + rng.range(4, 12), bz: z + rng.range(-14, 14), v: rng.range(0.08, 0.14) });
+      }
+    }
+    const mat = dogMat(bag, kit.time);
+    const meshes = new Map<DogBreed, { im: THREE.InstancedMesh; list: Dog[] }>();
+    for (const br of breeds) {
+      const list = dd.filter((d) => d.breed === br);
+      if (!list.length) continue;
+      const im = new THREE.InstancedMesh(bag.add(dogGeo(br)), mat, list.length);
+      list.forEach((d, i) => im.setColorAt(i, new THREE.Color(d.col)));
+      im.castShadow = true;
+      im.frustumCulled = false;
+      im.name = `dogs-${br}`;
+      group.add(im);
+      meshes.set(br, { im, list });
+    }
     updaters.push((_dt, t) => {
-      dd.forEach((d, i) => {
-        const a = t * d.w + d.ph;
-        const x = d.cx + Math.cos(a) * d.r, z = d.cz + Math.sin(a) * d.r;
-        const hop = Math.abs(Math.sin(t * 9 + d.ph)) * 0.5;
-        const yaw = Math.atan2(-Math.sin(a) * Math.sign(d.w), Math.cos(a) * Math.sign(d.w));
-        setInstance(dogs, i, x, field.height(x, z) + hop, z, 0, yaw, 0, 1.6);
-      });
-      dogs.instanceMatrix.needsUpdate = true;
+      for (const { im, list } of meshes.values()) {
+        list.forEach((d, i) => {
+          let x: number, z: number, yaw: number;
+          if (d.mode === 0) {
+            const a = t * d.w + d.ph;
+            x = d.cx + Math.cos(a) * d.r;
+            z = d.cz + Math.sin(a) * d.r;
+            yaw = Math.atan2(-Math.sin(a) * Math.sign(d.w), Math.cos(a) * Math.sign(d.w));
+          } else {
+            const c = (t * d.v + d.ph) % 2;
+            const f = c < 1 ? c : 2 - c;
+            const e = f * f * (3 - 2 * f);
+            x = d.ax + (d.bx - d.ax) * e;
+            z = d.az + (d.bz - d.az) * e;
+            yaw = Math.atan2(d.bx - d.ax, d.bz - d.az) + (c < 1 ? 0 : Math.PI);
+          }
+          const hop = Math.abs(Math.sin(t * 9 + d.ph)) * 0.35;
+          setInstance(im, i, x, Math.max(field.height(x, z), -1.0) + hop, z, 0, yaw, 0, d.s);
+        });
+        im.instanceMatrix.needsUpdate = true;
+      }
     });
   }
 
-  /* ------------------------------------------------ park fence + sign at the entrance */
+  /* ------------------------------------------------ Chicago Park District sign + flags at the entrance */
+  const flags = buildChicagoFlag(kit, 1.1);
   {
-    const t = bag.add(textTexture("LUPIN'S DOG PARK", { w: 1024, h: 192, bg: '#2fa84f', fg: '#ffffff', border: '#ffd23f' }));
     const s0 = track.sampleAt(0, 60);
-    const lat = s0.halfWidth + def.shoulder + 4;
+    const lat = s0.halfWidth + def.shoulder + 5;
     const x = s0.x + s0.nx * lat, z = s0.z + s0.nz * lat;
-    const y = field.height(x, z);
-    const sign = new THREE.Mesh(bag.add(new THREE.PlaneGeometry(14, 2.6)), bag.add(new THREE.MeshStandardMaterial({ map: t, side: THREE.DoubleSide })));
     const yaw = Math.atan2(-s0.nx, -s0.nz);
-    sign.position.set(x, y + 5, z);
-    sign.rotation.y = yaw;
-    group.add(sign);
-    parts.push([new THREE.BoxGeometry(0.5, 6.2, 0.5), '#6b4424', M.trs(x + Math.cos(yaw) * 6.6, y + 3.1, z - Math.sin(yaw) * 6.6, 0, yaw, 0)]);
-    parts.push([new THREE.BoxGeometry(0.5, 6.2, 0.5), '#6b4424', M.trs(x - Math.cos(yaw) * 6.6, y + 3.1, z + Math.sin(yaw) * 6.6, 0, yaw, 0)]);
-    placer.reserve(x, z, 8);
+    parkDistrictSign(kit, x, field.height(x, z), z, yaw, ["LUPIN'S DOG BEACH", 'CHICAGO PARK DISTRICT'], 15);
+    placer.reserve(x, z, 9);
+    for (const d of [-10, 10]) {
+      const fx = x + Math.cos(yaw) * d, fz = z - Math.sin(yaw) * d;
+      flags.add(fx, field.height(fx, fz), fz);
+      placer.reserve(fx, fz, 2);
+    }
+    // more Chicago flags along the start straight
+    for (const sp of placer.along(0, 55, 4, 2, { side: 0, from: 0, to: 260 })) flags.add(sp.x, sp.y, sp.z);
+    for (const sp of placer.along(0, 150, 5, 2, { side: 1, from: 300 })) flags.add(sp.x, sp.y, sp.z);
+  }
+
+  /* ------------------------------------------------ the Brown Line L rumbling past the west edge of the park */
+  {
+    const lx = b.minX - 70;
+    elevatedL(kit, placer, {
+      a: [lx, b.minZ - 260], b: [lx, b.maxZ + 260], deckY: 12,
+      lines: lo ? [CTA.brown] : [CTA.brown, CTA.red], cars: lo ? 4 : 6,
+      stations: [{ at: 0.5, name: 'MONTROSE', color: CTA.brown }],
+      period: 26,
+    });
   }
 
   if (parts.length) {
@@ -422,11 +476,201 @@ export function buildDogPark(ctx: SceneryContext): SceneryHandle {
     m.castShadow = m.receiveShadow = true;
     group.add(m);
   }
+  if (beach) buildDogBeach();
+  kit.flush();
   updaters.push(addClouds(ctx, bag, quality === 'low' ? 10 : 24, [120, 220], 1200, '#ffffff', 77));
+  trimShadows(group, quality);
 
+  /* ================================================ Montrose-style dog beach on Lake Michigan */
+  function buildDogBeach(): void {
+    const z0 = b.minZ - 700, z1 = b.maxZ + 700;
+    /* ---------- sand over the beach terrain (fades into the dune grass inland) */
+    {
+      const step = hi ? 4 : lo ? 8 : 6;
+      const xs: number[] = [];
+      for (let x = sandX; x < shoreX + 10; x += step) xs.push(x);
+      xs.push(shoreX + 10);
+      const nz = Math.ceil((z1 - z0) / step);
+      const pos: number[] = [], col: number[] = [], uv: number[] = [], idx: number[] = [];
+      const c = new THREE.Color(), sand = new THREE.Color('#efd6a0'), wet = new THREE.Color('#c8a873'), grass = new THREE.Color('#9fbf62');
+      const ok: boolean[] = [];
+      for (let j = 0; j <= nz; j++) {
+        const z = z0 + (j * (z1 - z0)) / nz;
+        xs.forEach((x, i) => {
+          const h = field.height(x, z);
+          const edge = i === 0;
+          pos.push(x, edge ? h - 0.4 : h + 0.14, z);
+          const wetF = Math.max(0, Math.min(1, (x - (shoreX - 7)) / 5));
+          const inl = Math.max(0, Math.min(1, (x - sandX) / 14));
+          c.copy(grass).lerp(sand, inl).lerp(wet, wetF);
+          c.multiplyScalar(0.94 + Math.sin(x * 0.7 + z * 0.13) * 0.03 + Math.sin(z * 0.05) * 0.03);
+          col.push(c.r, c.g, c.b);
+          uv.push(x / 9, z / 9);
+          ok.push(field.clearance(x, z, 40) > 1.5);
+        });
+      }
+      const nx = xs.length;
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx - 1; i++) {
+        const a = j * nx + i, b2 = a + 1, c2 = a + nx, d = c2 + 1;
+        if (!ok[a] || !ok[b2] || !ok[c2] || !ok[d]) continue;
+        idx.push(a, c2, b2, b2, c2, d);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      const tex = bag.add(noiseTexture('#ffffff', ['#e9dcc0', '#f7efdc', '#d8c8a4'], 21));
+      const m = new THREE.Mesh(bag.add(g), bag.add(new THREE.MeshStandardMaterial({ map: tex, vertexColors: true, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+      m.receiveShadow = true;
+      m.name = 'beachSand';
+      group.add(m);
+    }
+
+    /* ---------- surf: wave crests rolling in to the shore */
+    {
+      const N = hi ? 5 : 3;
+      const zc = (b.minZ + b.maxZ) / 2, len = b.maxZ - b.minZ + 900;
+      const foam = new THREE.InstancedMesh(bag.add(new THREE.PlaneGeometry(1, len, 1, 1).rotateX(-Math.PI / 2)), bag.add(new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.45, depthWrite: false })), N + 1);
+      foam.frustumCulled = false;
+      foam.renderOrder = 2;
+      foam.name = 'surf';
+      group.add(foam);
+      updaters.push((_dt, t) => {
+        for (let i = 0; i < N; i++) {
+          const c = (t * 0.09 + i / N) % 1;
+          const w = c < 0.85 ? 0.6 + c * 1.6 : (1 - c) / 0.15 * 2;
+          setInstance(foam, i, shoreX + 60 * (1 - c) + 1.5, -0.42 + c * 0.04, zc + Math.sin(t * 0.3 + i) * 6, 0, 0.01 * Math.sin(i), 0, Math.max(0.01, w), 1, 1);
+        }
+        setInstance(foam, N, shoreX + 0.8, -0.4, zc, 0, 0, 0, 2.2 + Math.sin(t * 1.3) * 0.8, 1, 1);
+        foam.instanceMatrix.needsUpdate = true;
+      });
+    }
+
+    /* ---------- sailboats, gulls, the harbor lighthouse */
+    buildLakeMichigan(kit, shoreX, [b.minZ - 300, b.maxZ + 300], hi ? 12 : lo ? 4 : 8, { plane: false, seawall: false, boatX: [70, 520] });
+    seagulls(kit, hi ? 22 : lo ? 6 : 12, { x0: shoreX - 80, x1: shoreX + 160, z0: b.minZ - 80, z1: b.maxZ + 80, y0: 12, y1: 32 });
+    lighthouse(kit, shoreX + 150, -0.6, b.minZ - 60, Math.PI / 2, 1.4, 112);
+
+    /* ---------- dunes with marram grass between the park and the sand */
+    {
+      const dune = kit.batch(mergeColored([
+        [new THREE.IcosahedronGeometry(1, 1), '#d6b97c', M.trs(0, 0, 0, 0, 0, 0, 1, 0.34, 1)],
+        [new THREE.IcosahedronGeometry(0.8, 1), '#8fb352', M.trs(0.1, 0.1, 0.05, 0, 0, 0, 1, 0.34, 1)],
+      ]), kit.solidMat, { cast: false, name: 'dunes' });
+      const tuft = kit.batch(mergeColored([0, 1, 2, 3, 4].map((i) => [new THREE.ConeGeometry(0.08, 1.4, 3), i % 2 ? '#a9c25e' : '#8aa84a', M.trs(Math.cos(i * 1.3) * 0.25, 0.65, Math.sin(i * 1.3) * 0.25, Math.cos(i) * 0.3, 0, Math.sin(i) * 0.3)] as [THREE.BufferGeometry, string, THREE.Matrix4])), kit.solidMat, { cast: false, name: 'marram' });
+      for (let z = z0 + 200; z < z1 - 200; z += rng.range(10, 18) * (lo ? 2 : 1)) {
+        const x = sandX + rng.range(-4, 10);
+        if (!placer.ok(x, z, 6, 3)) continue;
+        const sc = rng.range(6, 11);
+        dune.add(x, field.height(x, z) - 0.3, z, rng.next() * 6, sc, sc * rng.range(0.6, 1.1), sc * rng.range(0.8, 1.4));
+        for (let k = 0; k < (lo ? 2 : 5); k++) {
+          const tx = x + rng.range(-sc * 0.6, sc * 0.6), tz = z + rng.range(-sc * 0.6, sc * 0.6);
+          tuft.add(tx, field.height(tx, tz) + 0.4, tz, rng.next() * 6, rng.range(1.2, 2));
+        }
+      }
+    }
+
+    /* ---------- umbrellas, towels, lifeguard chairs, beach-goers */
+    {
+      const umb = kit.batch(mergeColored([
+        [new THREE.CylinderGeometry(0.06, 0.06, 3, 5), '#eeeeee', M.t(0, 1.5, 0)],
+        [new THREE.ConeGeometry(1.9, 0.8, 8), '#ffffff', M.t(0, 3.1, 0)],
+      ]), kit.tintMat, { name: 'umbrellas' });
+      const towels = kit.batch(new THREE.PlaneGeometry(1.2, 2.2).rotateX(-Math.PI / 2).translate(0, 0.17, 0), bag.add(new THREE.MeshStandardMaterial({ roughness: 1 })), { cast: false, name: 'towels' });
+      const cols = ['#ff4d6d', '#ffd23f', '#3aa8ff', '#3ccf6e', '#ff8a3d', '#b26bff', '#41B6E6', '#E4002B'];
+      for (let z = b.minZ - 220; z < b.maxZ + 220; z += rng.range(9, 15)) {
+        const x = shoreX - rng.range(10, beachW - 6);
+        if (!placer.ok(x, z, 2.2, 4)) continue;
+        placer.reserve(x, z, 2.2);
+        const y = field.height(x, z);
+        umb.add(x, y, z, rng.next() * 6, 1, 1, 1, rng.pick(cols));
+        towels.add(x + 1.6, y, z + rng.range(-1, 1), rng.range(-0.3, 0.3), 1, 1, 1, rng.pick(cols));
+        if (!lo && rng.chance(0.55)) kit.person(x + rng.range(-2.5, 2.5), y, z + rng.range(-2, 2), rng.range(-1, 1) - Math.PI / 2, rng.pick(shirt), rng.range(0.8, 1));
+      }
+      const guards = kit.batch(lifeguardGeo(), kit.solidMat, { name: 'lifeguards' });
+      for (const z of [b.minZ + 60, (b.minZ + b.maxZ) / 2 + 20, b.maxZ + 40]) {
+        const x = shoreX - 12;
+        const p = findSpot(placer, x, z, 2.5, 4, 20);
+        if (!p) continue;
+        placer.reserve(p.x, p.z, 2.5);
+        guards.add(p.x, field.height(p.x, p.z), p.z, -Math.PI / 2 + Math.PI, 1.3);
+        flags.add(p.x - 3, field.height(p.x - 3, p.z + 3), p.z + 3);
+      }
+      // dog-park regulars waving from the water's edge
+      if (!lo) for (let i = 0; i < (hi ? 22 : 10); i++) {
+        const x = shoreX - rng.range(1, 8), z = rng.range(b.minZ - 100, b.maxZ + 100);
+        kit.person(x, field.height(x, z), z, -Math.PI / 2 + rng.range(-0.8, 0.8), rng.pick(shirt), rng.range(0.85, 1));
+      }
+    }
+
+    /* ---------- the hot dog stand + DOG BEACH sign at the beach entrance */
+    {
+      const p = findSpot(placer, shoreX - beachW + 4, (b.minZ + b.maxZ) / 2 + 30, 7, 6, 80);
+      if (p) {
+        placer.reserve(p.x, p.z, 7);
+        hotDogStand(kit, p.x, field.height(p.x, p.z), p.z, faceRoad(placer, p.x, p.z), 1.1);
+        if (!lo) for (let i = 0; i < 5; i++) {
+          const yaw = faceRoad(placer, p.x, p.z);
+          const px = p.x + Math.sin(yaw) * 5 + rng.range(-3, 3), pz = p.z + Math.cos(yaw) * 5 + rng.range(-2, 2);
+          kit.person(px, field.height(px, pz), pz, yaw + Math.PI, rng.pick(shirt), rng.range(0.85, 1));
+        }
+      }
+      const q = findSpot(placer, sandX + 2, b.maxZ - 60, 6, 5, 80);
+      if (q) {
+        placer.reserve(q.x, q.z, 6);
+        parkDistrictSign(kit, q.x, field.height(q.x, q.z), q.z, faceRoad(placer, q.x, q.z), ['MONTROSE DOG BEACH', 'CHICAGO PARK DISTRICT'], 11);
+      }
+      const r = findSpot(placer, sandX + 2, b.minZ + 40, 6, 5, 80);
+      if (r) {
+        placer.reserve(r.x, r.z, 6);
+        parkDistrictSign(kit, r.x, field.height(r.x, r.z), r.z, faceRoad(placer, r.x, r.z), ['DOG BEACH', 'DOGS OFF LEASH - LAKE MICHIGAN'], 10);
+      }
+    }
+
+    /* ---------- kites over the beach */
+    if (!lo) kites(kit, [0, 1, 2, 3].map((i) => ({ x: shoreX - rng.range(5, 25), z: b.minZ + (i + 0.5) * ((b.maxZ - b.minZ) / 4), h: rng.range(22, 34) })));
+
+    /* ---------- the downtown skyline across the water (hazy, own kit) */
+    {
+      const skyGroup = new THREE.Group();
+      skyGroup.name = 'skylineAcrossTheLake';
+      group.add(skyGroup);
+      const sky = new Kit(bag, skyGroup, { lit: 0, snow: false, quality });
+      const ax = shoreX + 380, az = b.maxZ + 900, bx = shoreX + 980, bz = b.maxZ + 260;
+      const at = (f: number) => [ax + (bx - ax) * f, az + (bz - az) * f] as const;
+      const len = Math.hypot(bx - ax, bz - az), ang = Math.atan2(bx - ax, bz - az);
+      const [mx, mz] = at(0.5);
+      sky.solid.push([new THREE.BoxGeometry(150, 3, len + 260), '#6f8a5a', M.trs(mx + 40, -1.2, mz + 20, 0, ang, 0)]);
+      sky.solid.push([new THREE.BoxGeometry(6, 2.4, len + 260), '#d9d2c2', M.trs(mx - 34, -1.2, mz - 26, 0, ang, 0)]);
+      const face = Math.atan2(-(bz - az), bx - ax) - Math.PI / 2;
+      const icons: Array<[(k: Kit, x: number, y: number, z: number, rot?: number, s?: number) => void, number, number]> = [
+        [aonCenter, 0.08, 0.85], [glassSpireTower, 0.24, 0.85], [marinaCity, 0.36, 0.8], [tribuneTower, 0.44, 0.8], [willisTower, 0.56, 0.9],
+        [wavyTower, 0.68, 0.8], [hancockCenter, 0.84, 0.9],
+      ];
+      for (const [fn, f, sc] of icons) {
+        const [x, z] = at(f);
+        fn(sky, x + 30, -0.5, z + 30, face, sc);
+      }
+      const kinds = ['glass', 'stone', 'dark', 'white', 'blue', 'tan'] as const;
+      for (let i = 0; i < (lo ? 14 : 30); i++) {
+        const f = rng.next();
+        const [x, z] = at(f);
+        const w = rng.range(18, 34), d = rng.range(18, 34), h = rng.range(40, 150) * (rng.chance(0.15) ? 1.6 : 1);
+        sky.facade(kinds[i % kinds.length], boxUV(w, h, d), M.trs(x + rng.range(-10, 110), -0.5, z + rng.range(-10, 110), 0, face + rng.range(-0.2, 0.2), 0));
+      }
+      sky.flush();
+      hazeObject(skyGroup, 0.5);
+      updaters.push((dt, t) => sky.update(dt, t));
+    }
+  }
+
+  countScenery(group, 'dog-' + quality); // TEMPCOUNT
   return {
     update(dt: number, time: number) {
       for (const u of updaters) u(dt, time);
+      kit.update(dt, time);
     },
     dispose() {
       disposeGroup(group);

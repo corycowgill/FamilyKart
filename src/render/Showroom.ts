@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CHARACTERS } from '../data/characters';
+import { CHARACTERS, characterById } from '../data/characters';
 import type { CharacterId } from '../sim/types';
 import { buildCharacter } from './models/characterModels';
 import { buildKart } from './models/kartModels';
@@ -132,6 +132,24 @@ export class Showroom {
       canvas.addEventListener(n2, fn);
       this.handlers.push([n2, fn]);
     }
+  }
+
+  /** Rebuild one racer's kart (e.g. after its livery changed in the Garage); the driver hops into the new kart. */
+  refreshKart(id: CharacterId): void {
+    const e = this.entries.find((x) => x.id === id);
+    if (!e) return;
+    const old = e.kart;
+    const kart = buildKart(characterById(id));
+    kart.seat.add(e.ch.root);
+    kart.root.position.copy(old.root.position);
+    kart.root.rotation.copy(old.root.rotation);
+    kart.root.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = true;
+    });
+    this.scene.remove(old.root);
+    old.dispose();
+    this.scene.add(kart.root);
+    e.kart = kart;
   }
 
   /** Spin the turntable (right stick / drag). */

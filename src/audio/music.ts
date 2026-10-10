@@ -9,12 +9,16 @@
  *              head, boogie bass, triplet piano + organ, a stop-time break and a horn-section out-chorus
  *   rock    -> fast Chicago BLUES shuffle for the Chicago Grand Prix (12-bar form, boogie bass,
  *              harmonica call-and-response, organ chops, horn stabs on the final lap)
- *   results -> Chicago HOUSE party (four-on-the-floor, offbeat open hats, piano stabs, deep bass)
+ *   results -> Chicago HOUSE party (four-on-the-floor, offbeat open hats, piano stabs, deep bass) with a crowd
+ *              chant layer (stadium clap-clap rhythm + wordless "woo!" formant bursts)
+ *
+ * The Chicago styles (rock, blues/menu, snow) mark section changes with an "L train" fill: a clackety-clack
+ * wheels-over-rail-joints rhythm on rim and snare.
  *   snow    -> holiday SWING jazz (walking bass, ride + brushes + sleigh bells, vibes, piano comp)
  */
 import type { TrackDef } from '../sim/types';
 import { Rng } from '../core/rng';
-import { type Ctx, fm, midiToHz, noise, tone } from './synth';
+import { type Ctx, fm, formantVoice, midiToHz, noise, tone } from './synth';
 
 export type ScaleName = TrackDef['music']['scale'];
 export type MusicStyle = 'rock' | 'funk' | 'bouncy' | 'kitchen' | 'dogpark' | 'snow' | 'menu' | 'results' | 'blues';
@@ -34,7 +38,29 @@ const SCALES: Record<ScaleName, number[]> = {
   dorian: [0, 2, 3, 5, 7, 9, 10],
 };
 
-type DrumKind = 'kick' | 'snare' | 'clap' | 'hat' | 'ohat' | 'rim' | 'shaker' | 'sleigh' | 'crash' | 'tom' | 'ride' | 'brush' | 'riser';
+type DrumKind = 'kick' | 'snare' | 'clap' | 'hat' | 'ohat' | 'rim' | 'shaker' | 'sleigh' | 'crash' | 'tom' | 'ride' | 'brush' | 'riser'
+  | 'clack' | 'crowdClap' | 'woo';
+
+/**
+ * "L train" fill for one bar (16 steps): clack-e-ty CLACK, clack-e-ty CLACK, then a rolling build of
+ * rim + snare, like the wheels of an elevated train rattling over the rail joints.
+ * [step, kind, velocity]
+ */
+const L_TRAIN_FILL: Array<[number, DrumKind, number]> = [
+  [0, 'clack', 0.9], [1, 'clack', 0.55], [2, 'clack', 0.6], [4, 'clack', 1],
+  [8, 'clack', 0.9], [9, 'clack', 0.55], [10, 'clack', 0.6], [12, 'clack', 1],
+  [13, 'rim', 0.5], [14, 'snare', 0.6], [15, 'snare', 0.8],
+];
+
+/**
+ * Results-screen crowd chant over two bars: a stadium "clap clap, clap-clap-clap" rhythm and a
+ * wordless "woo!" from the crowd at the end of the phrase. [step from the first bar, kind, velocity]
+ */
+const CROWD_CHANT: Array<[number, DrumKind, number]> = [
+  [0, 'crowdClap', 1], [4, 'crowdClap', 0.9],
+  [16, 'crowdClap', 1], [20, 'crowdClap', 0.9], [24, 'crowdClap', 1],
+  [28, 'woo', 1],
+];
 type BassInst = 'saw' | 'square' | 'tri' | 'sine' | 'house' | 'upright';
 type ChordInst = 'power' | 'stab' | 'pizz' | 'uke' | 'pad' | 'bellpad' | 'brass' | 'piano' | 'organ' | 'jazzpiano';
 type LeadInst = 'sawlead' | 'square' | 'xylo' | 'whistle' | 'glock' | 'brass' | 'harp' | 'vibes' | 'organlead';
@@ -313,6 +339,8 @@ class Arranger {
       if (bar % 8 === 0) add(0, { k: 'crash', len: 1, v: 0.8, minI: 0 });
       if (bar % 8 === 7) add(0, { k: 'riser', len: 16, v: 1, minI: 0 });
       if (breakdown) for (const s of [12, 13, 14, 15]) add(s, { k: 'clap', len: 1, v: 0.45 + (s - 12) * 0.15, minI: 0 });
+      // crowd chant layer: the whole party claps along (every 2-bar phrase except the breakdown bars)
+      if (bar % 2 === 0) for (const [st, k, v] of CROWD_CHANT) if (!(bar % 8 === 6 && st >= 16 + 8)) steps[base + st].push({ k, len: 1, v, minI: 0 });
       // deep house bass: offbeat-heavy with an octave jump
       const r = this.deg2midi(chord) - 24;
       const fifth = this.deg2midi(chord + 4) - 24;
@@ -409,8 +437,8 @@ class Arranger {
       add(10, { k: 'rim', len: 1, v: 0.5, minI: 0.4 });
       if (formBar === 0) add(0, { k: 'crash', len: 1, v: 0.85, minI: 0 });
       if (lastOfChorus) {
-        // turnaround fill: snare/tom triplet-ish pickup
-        for (const [s, k, v] of [[10, 'snare', 0.6], [12, 'tom', 0.75], [14, 'tom', 0.85]] as Array<[number, DrumKind, number]>) add(s, { k, m: [s], len: 1, v, minI: 0 });
+        // section change: the "L train" rattles through (clackety-clack fill)
+        for (const [s, k, v] of L_TRAIN_FILL) add(s, { k, m: [s], len: 1, v, minI: 0 });
       }
       // ---- boogie-woogie bass: root 3 5 6 b7 6 5 3 in shuffled 8ths
       const walk = [0, 4, 7, 9, 10, 9, 7, 4];
@@ -513,7 +541,11 @@ class Arranger {
       add(4, { k: 'snare', len: 1, v: 0.95, minI: 0 });
       add(12, { k: 'snare', len: 1, v: 0.95, minI: 0 });
       if (fb === 0) add(0, { k: 'crash', len: 1, v: chorus === 0 ? 0.6 : 0.85, minI: 0 });
-      if (fb === 11) for (const [s, k, v] of [[10, 'snare', 0.6], [12, 'tom', 0.75], [14, 'tom', 0.85]] as Array<[number, DrumKind, number]>) add(s, { k, m: [s], len: 1, v, minI: 0 });
+      if (fb === 11) {
+        // into the next chorus: the "L train" fill on the even choruses, the snare/tom pickup otherwise
+        const fill: Array<[number, DrumKind, number]> = chorus % 2 === 0 ? L_TRAIN_FILL : [[10, 'snare', 0.6], [12, 'tom', 0.75], [14, 'tom', 0.85]];
+        for (const [s, k, v] of fill) add(s, { k, m: [s], len: 1, v, minI: 0 });
+      }
       // ---- boogie bass (root 3 5 6 b7 6 5 3), leading into each chord change
       [0, 4, 7, 9, 10, 9, 7, 4].forEach((iv, j) => {
         let m = croot + iv - 24;
@@ -570,6 +602,8 @@ class Arranger {
       for (const s of [2, 6, 10, 14]) add(s, { k: 'sleigh', len: 1, v: 0.45, minI: 0.4 });
       if (bar % 4 === 3) for (const [s, v] of [[10, 0.5], [14, 0.8]] as Array<[number, number]>) add(s, { k: 'snare', len: 1, v, minI: 0 });
       else if (rng.chance(0.4)) add(14, { k: 'rim', len: 1, v: 0.6, minI: 0 });
+      // into each 8-bar section: a soft "L train" clackety-clack under the brushes
+      if (bar % 8 === 7) for (const [s, k, v] of L_TRAIN_FILL) if (k === 'clack' && s < 10) add(s, { k, len: 1, v: v * 0.7, minI: 0 });
       if (bar % 8 === 0) add(0, { k: 'crash', len: 1, v: 0.55, minI: 0 });
       // ---- walking bass: root, chord tone, chord tone, chromatic approach to the next root
       const lo = (m: number) => { let x = m - 24; while (x < 36) x += 12; while (x > 52) x -= 12; return x; };
@@ -788,6 +822,26 @@ function drum(ctx: Ctx, out: AudioNode, k: DrumKind, t: number, v: number, extra
       break;
     case 'riser':
       noise(ctx, out, { t, dur: Math.max(0.3, dur), vol: 0.06 * v, filter: 'bandpass', cutoff: 400, cutoffTo: 7000, q: 2.5, attack: Math.max(0.2, dur * 0.85), shape: 'asr', release: 0.05 });
+      break;
+    case 'clack': // steel wheel over a rail joint: woody rim "tok" + metallic ring + low body thump
+      tone(ctx, out, { type: 'square', freq: 540, to: 470, t, dur: 0.035, vol: 0.09 * v, filter: 'bandpass', cutoff: 1500, q: 4 });
+      fm(ctx, out, { freq: 1730, ratio: 1.41, index: 0.8, indexTo: 0.1, t, dur: 0.06, vol: 0.025 * v });
+      noise(ctx, out, { t, dur: 0.025, vol: 0.11 * v, filter: 'bandpass', cutoff: 2600, q: 2.5 });
+      tone(ctx, out, { type: 'sine', freq: 110, to: 70, t, dur: 0.07, vol: 0.12 * v });
+      break;
+    case 'crowdClap': // a crowd clapping together: several slightly-scattered hand claps in a big room
+      for (let i = 0; i < 5; i++) {
+        const dt = ((i * 7) % 5) * 0.006;
+        noise(ctx, out, { t: t + dt, dur: 0.05 + i * 0.008, vol: 0.05 * v, filter: 'bandpass', cutoff: 1100 + i * 260, q: 1.6 });
+      }
+      noise(ctx, out, { t: t + 0.01, dur: 0.22, vol: 0.025 * v, filter: 'bandpass', cutoff: 1800, q: 0.8 }); // room tail
+      break;
+    case 'woo': // wordless crowd "woo!": a few rising formant voices + breathy air
+      for (let i = 0; i < 3; i++) {
+        const f0 = 230 + i * 85;
+        formantVoice(ctx, out, { t: t + i * 0.03, dur: 0.55, vol: 0.05 * v, f0, f0To: f0 * 1.5, f1: 330, f1To: 430, f2: 780, f2To: 980, breath: 0.012, attack: 0.06 });
+      }
+      noise(ctx, out, { t, dur: 0.5, vol: 0.02 * v, filter: 'bandpass', cutoff: 1400, cutoffTo: 2600, q: 1, attack: 0.1 });
       break;
   }
 }

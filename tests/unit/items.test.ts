@@ -5,7 +5,7 @@ import { ITEM_TUNING } from '../../src/sim/items/ItemSystem';
 import { hitKart } from '../../src/sim/kart/KartPhysics';
 import { RaceSim } from '../../src/sim/race/RaceSim';
 import type { CharacterId, ItemId, KartState, SimEvent } from '../../src/sim/types';
-import { ALL_CHARACTERS, OVAL, STADIUM, humanSim, placeInSim } from './fixtures';
+import { ALL_CHARACTERS, OVAL, STADIUM, aiSim, humanSim, placeInSim } from './fixtures';
 
 type Ev<T extends SimEvent['type']> = Extract<SimEvent, { type: T }>;
 
@@ -26,7 +26,7 @@ function setup(chars: CharacterId[] = ['dad', 'mom']): RaceSim {
   });
 }
 
-const ALL_ITEMS: ItemId[] = ['turboSoda', 'flyingPizza', 'bananaPeel', 'bubbleShield', 'giantDogBone', 'chicagoPothole', 'rocketKart', 'mysteryBox'];
+const ALL_ITEMS: ItemId[] = ['turboSoda', 'flyingPizza', 'bananaPeel', 'bubbleShield', 'giantDogBone', 'chicagoPothole', 'rocketKart', 'mysteryBox', 'windyGust'];
 
 describe('item boxes', () => {
   it('driving through a box starts the roulette, grants an item, and the box respawns', () => {
@@ -222,6 +222,119 @@ describe('item activation', () => {
       expect(k.item).toBeNull();
     }
     expect(seen.size).toBeGreaterThanOrEqual(5);
+  });
+
+  it('windyGust slows and shoves only racers ahead, without spinning them out', () => {
+    const sim = humanSim(STADIUM, 4);
+    const [user, behind, ahead1, ahead2] = sim.karts;
+    placeInSim(sim, behind, 60, 3, 20);
+    placeInSim(sim, user, 80, 0, 20);
+    placeInSim(sim, ahead1, 120, 3, 20);
+    placeInSim(sim, ahead2, 200, -3, 20);
+    // control: the same racers' lateral velocity is zero before the gust
+    user.item = 'windyGust';
+    sim.items.useItem(user);
+    const ev = sim.drainEvents();
+    const gust = ev.find((e): e is Ev<'gust'> => e.type === 'gust');
+    expect(gust).toMatchObject({ kart: user.id });
+    expect([...gust!.victims].sort()).toEqual([ahead1.id, ahead2.id].sort());
+    const hits = ev.filter((e): e is Ev<'hit'> => e.type === 'hit');
+    expect(hits.map((h) => h.kart).sort()).toEqual([ahead1.id, ahead2.id].sort());
+    for (const h of hits) expect(h).toMatchObject({ by: user.id, cause: 'wind' });
+    // shoved toward the outside (the side of the road they are already on)
+    const lateralVel = (k: KartState) => {
+      const smp = sim.track.sampleAt(0, k.mainS);
+      return k.vel.x * smp.nx + k.vel.z * smp.nz;
+    };
+    expect(lateralVel(ahead1)).toBeGreaterThan(2);
+    expect(lateralVel(ahead2)).toBeLessThan(-2);
+    expect(Math.abs(lateralVel(behind))).toBeLessThan(0.01);
+    expect(sim.items.blownTime(ahead1.id)).toBeGreaterThan(0);
+    expect(sim.items.blownTime(behind.id)).toBe(0);
+    expect(sim.items.blownTime(user.id)).toBe(0);
+    const v0 = Math.hypot(ahead1.vel.x, ahead1.vel.z);
+    const vb0 = Math.hypot(behind.vel.x, behind.vel.z);
+    stepFor(sim, ITEM_TUNING.gust.duration + 0.05);
+    // slowed noticeably compared with an unaffected kart (all coast with no input), but never spun out
+    const slowed = Math.hypot(ahead1.vel.x, ahead1.vel.z) / v0;
+    const coasted = Math.hypot(behind.vel.x, behind.vel.z) / vb0;
+    expect(slowed).toBeLessThan(coasted * 0.8);
+    for (const k of [ahead1, ahead2]) {
+      expect(k.spinTime).toBe(0);
+      expect(k.stats.hitsTaken).toBe(1);
+    }
+    expect(behind.stats.hitsTaken).toBe(0);
+    expect(user.stats.hitsTaken).toBe(0);
+    expect(sim.items.blownTime(ahead1.id)).toBe(0);
+  });
+
+  it('windyGust is blocked by shields and ignored by rockets / invulnerable racers (no stun-lock)', () => {
+    const sim = humanSim(STADIUM, 4);
+    const [user, shielded, rocket, invuln] = sim.karts;
+    placeInSim(sim, user, 40, 0, 20);
+    placeInSim(sim, shielded, 100, 2, 20);
+    placeInSim(sim, rocket, 140, 2, 20);
+    placeInSim(sim, invuln, 180, 2, 20);
+    shielded.shieldTime = 5;
+    rocket.rocketTime = 2;
+    invuln.invulnTime = 1;
+    const vel = (k: KartState) => ({ ...k.vel });
+    const before = [rocket, invuln].map(vel);
+    user.item = 'windyGust';
+    sim.items.useItem(user);
+    const ev = sim.drainEvents();
+    expect(ev.find((e) => e.type === 'shieldBlock')).toMatchObject({ kart: shielded.id });
+    expect(shielded.shieldTime).toBeGreaterThan(0); // deflected, not popped
+    expect(ev.some((e) => e.type === 'hit')).toBe(false);
+    expect(ev.find((e): e is Ev<'gust'> => e.type === 'gust')!.victims).toEqual([]);
+    expect([rocket, invuln].map(vel)).toEqual(before);
+    for (const k of [shielded, rocket, invuln]) expect(sim.items.blownTime(k.id)).toBe(0);
+
+    // a second gust right after the first cannot chain-hit a racer it just blew about
+    const sim2 = humanSim(STADIUM, 3);
+    const [a, b, c] = sim2.karts;
+    placeInSim(sim2, a, 40, 0, 20);
+    placeInSim(sim2, b, 60, 0, 20);
+    placeInSim(sim2, c, 120, 2, 20);
+    a.item = 'windyGust';
+    sim2.items.useItem(a);
+    expect(c.stats.hitsTaken).toBe(1);
+    stepFor(sim2, 0.2);
+    b.item = 'windyGust';
+    sim2.items.useItem(b);
+    expect(c.stats.hitsTaken).toBe(1);
+  });
+
+  it('AI uses windyGust when 2+ racers are bunched up within ~80 m ahead, and holds it otherwise', () => {
+    const run = (gaps: number[]) => {
+      const sim = aiSim(STADIUM, { countdown: 0.05, difficulty: 'hard' }, ['dad', 'mom', 'bro1']);
+      while (sim.phase === 'countdown') sim.step();
+      sim.drainEvents();
+      const [k, ...others] = sim.karts;
+      placeInSim(sim, k, 40, 0, 15);
+      others.forEach((o, i) => placeInSim(sim, o, 40 + gaps[i], i % 2 ? 3 : -3, 15));
+      for (const o of others) o.item = 'bubbleShield'; // keep the others' item use out of the way
+      for (const o of others) o.specialCooldown = 99;
+      k.specialCooldown = 99;
+      k.item = 'windyGust';
+      const ev = stepFor(sim, 1.6, (e) => e.some((x) => x.type === 'itemUse' && x.kart === k.id));
+      return ev.some((e) => e.type === 'itemUse' && e.kart === k.id && e.item === 'windyGust');
+    };
+    expect(run([25, 50])).toBe(true);
+    expect(run([200, 300])).toBe(false);
+  });
+
+  it('windyGust used by the leader hits nobody', () => {
+    const sim = humanSim(STADIUM, 3);
+    const [a, b, c] = sim.karts;
+    placeInSim(sim, a, 150, 0, 20);
+    placeInSim(sim, b, 100, 0, 20);
+    placeInSim(sim, c, 60, 0, 20);
+    a.item = 'windyGust';
+    sim.items.useItem(a);
+    const ev = sim.drainEvents();
+    expect(ev.some((e) => e.type === 'hit')).toBe(false);
+    expect(b.stats.hitsTaken + c.stats.hitsTaken).toBe(0);
   });
 
   it('items cannot be used while spinning or respawning', () => {
@@ -423,6 +536,14 @@ describe('position-weighted item odds', () => {
     const total = Object.values(w).reduce((a, b) => a + (b ?? 0), 0);
     return ids.reduce((a, id) => a + (w[id] ?? 0), 0) / total;
   };
+
+  it('windyGust is a mid-pack-to-back item, never for the leader', () => {
+    expect(itemWeights(0).windyGust ?? 0).toBe(0);
+    expect(itemWeights(0.2).windyGust ?? 0).toBe(0);
+    expect(itemWeights(0.6).windyGust).toBeGreaterThan(0);
+    expect(itemWeights(1).windyGust).toBeGreaterThan(itemWeights(0.6).windyGust!);
+    expect(ITEMS.windyGust).toMatchObject({ name: 'Windy City Gust', icon: '🌬️' });
+  });
 
   it('leader never gets rocketKart', () => {
     expect(itemWeights(0).rocketKart ?? 0).toBe(0);

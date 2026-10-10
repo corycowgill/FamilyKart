@@ -6,6 +6,7 @@ import { getField } from './field';
 import { flagTexture } from './textures';
 import {
   aonCenter, ballpark, beefStand, bluesClub, bungalow, pizzeria, popcornShop, windGusts, buildChicagoFlag, CTA, frameHouse, twoFlat, cornerTavern, dibsGeo, elevatedL, faceRoad, findSpot, glassSpireTower, hancockCenter, hotDogStand, Kit, marinaCity, willisTower,
+  runningDogs,
 } from './chicagoLandmarks';
 
 type P = Array<[THREE.BufferGeometry, THREE.ColorRepresentation, THREE.Matrix4?]>;
@@ -375,6 +376,9 @@ export function buildNeighborhood(ctx: SceneryContext): SceneryHandle {
     for (const sp of placer.along(0, lo ? 300 : 150, 3, 1)) flags.add(sp.x, sp.y, sp.z);
   }
   if (!lo) windGusts(kit, ['#e0882c', '#f2b13c', '#c94a2a', '#7cc65a', '#d9a63a'], hi ? 380 : 180, { speed: 8 });
+  /* ------------------------------------------------ MOAR Chicago life: neighborhood dogs out for a run */
+  if (!lo) runningDogs(kit, (x, z) => field.height(x, z), placer.scatter(hi ? 9 : 5, { minX: b.minX - 30, maxX: b.maxX + 30, minZ: b.minZ - 30, maxZ: b.maxZ + 30 }, 8, 3), { seed: 773 });
+
   kit.flush();
 
   trimShadows(group, quality);

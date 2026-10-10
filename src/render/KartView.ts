@@ -27,6 +27,12 @@ export class KartView {
   private label?: THREE.Sprite;
   readonly interpPos = new THREE.Vector3();
   interpYaw = 0;
+  /** Local (root space, +Z forward) head/tail light positions for the time-of-day kart lights. */
+  readonly lightAnchors: { head: THREE.Vector3[]; tail: THREE.Vector3[] };
+  /** 0..1 brake-light amount (decelerating / standing still / reversing) */
+  brake = 0;
+  private prevSpeed = 0;
+  private trailPrev: Array<{ x: number; y: number; z: number } | null> = [null, null];
 
   constructor(private state: KartState, showLabel: boolean, quality: 'low' | 'medium' | 'high' = 'high') {
     const def = characterById(state.character);
@@ -43,6 +49,27 @@ export class KartView {
       m.castShadow = m.castShadow && quality === 'high' && (m.geometry.boundingSphere?.radius ?? 0) > 0.3;
     });
     this.root.add(this.kart.root);
+    // head / tail light anchors from the kart's bounds (models stay untouched)
+    {
+      const box = new THREE.Box3();
+      this.kart.root.updateMatrixWorld(true);
+      this.kart.root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.geometry) return;
+        if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+        const b = m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld);
+        // ignore the driver's head (tall) so lights sit on the chassis
+        if (b.min.y > 1.2) return;
+        box.union(b);
+      });
+      if (box.isEmpty()) box.set(new THREE.Vector3(-0.8, 0, -1.2), new THREE.Vector3(0.8, 1, 1.3));
+      const hx = Math.max(0.3, (box.max.x - box.min.x) * 0.32);
+      const y = box.min.y + Math.min(0.55, (box.max.y - box.min.y) * 0.35) + 0.12;
+      this.lightAnchors = {
+        head: [new THREE.Vector3(-hx, y, box.max.z - 0.05), new THREE.Vector3(hx, y, box.max.z - 0.05)],
+        tail: [new THREE.Vector3(-hx * 0.95, y + 0.05, box.min.z + 0.05), new THREE.Vector3(hx * 0.95, y + 0.05, box.min.z + 0.05)],
+      };
+    }
 
     const shieldMat = new THREE.MeshPhysicalMaterial({
       color: '#9fe8ff', transparent: true, opacity: 0.28, roughness: 0.05, metalness: 0, transmission: 0, clearcoat: 1,
@@ -89,8 +116,20 @@ export class KartView {
     }
   }
 
+  /** Sim state this view follows (read-only use by time-of-day kart lights). */
+  get kartState(): KartState {
+    return this.state;
+  }
+
   update(dt: number, alpha: number, time: number, fx: Effects | null): void {
     const k = this.state;
+    if (dt > 0) {
+      // brake lights: decelerating hard, nearly stopped or reversing
+      const decel = (this.prevSpeed - k.forwardSpeed) / dt;
+      this.prevSpeed = k.forwardSpeed;
+      const target = (decel > 5 && k.forwardSpeed > 1) || Math.abs(k.forwardSpeed) < 0.6 || k.forwardSpeed < -0.5 ? 1 : 0;
+      this.brake += (target - this.brake) * Math.min(1, dt * (target > this.brake ? 18 : 5));
+    }
     // interpolate between previous and current sim step
     this.interpPos.set(
       k.prevPos.x + (k.pos.x - k.prevPos.x) * alpha,
@@ -187,6 +226,35 @@ export class KartView {
     } else if (skids) {
       skids.lift(k.id * 2);
       skids.lift(k.id * 2 + 1);
+    }
+    // night light trails: boosting karts leave thin streaks from their tail lights (evenly spaced dots)
+    if (boosting && fx.night > 0.4 && fx.quality !== 'low' && speed > 10) {
+      const cy = Math.cos(this.interpYaw), sy = Math.sin(this.interpYaw);
+      const gap = fx.quality === 'high' ? 0.35 : 0.6;
+      this.lightAnchors.tail.forEach((a, i) => {
+        const x = this.interpPos.x + a.x * cy + a.z * sy, y = this.interpPos.y + a.y, z = this.interpPos.z - a.x * sy + a.z * cy;
+        const p = this.trailPrev[i];
+        if (!p) {
+          this.trailPrev[i] = { x, y, z };
+          return;
+        }
+        const d = Math.hypot(x - p.x, z - p.z);
+        if (d > 6) {
+          this.trailPrev[i] = { x, y, z };
+          return;
+        }
+        const steps = Math.min(8, Math.floor(d / gap));
+        for (let j = 1; j <= steps; j++) {
+          const f = (j * gap) / d;
+          fx.glow.emit({ x: p.x + (x - p.x) * f, y: p.y + (y - p.y) * f, z: p.z + (z - p.z) * f, color: flameColor, size: 0.22, life: 0.35, drag: 0 });
+        }
+        if (steps > 0) {
+          const f = (steps * gap) / d;
+          this.trailPrev[i] = { x: p.x + (x - p.x) * f, y: p.y + (y - p.y) * f, z: p.z + (z - p.z) * f };
+        }
+      });
+    } else {
+      this.trailPrev[0] = this.trailPrev[1] = null;
     }
     if (boosting) {
       for (const ex of this.kart.exhausts) {
