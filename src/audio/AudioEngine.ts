@@ -56,6 +56,9 @@ interface ActiveSfx {
 
 const clamp01 = (v: number) => (isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
 
+/** 50 ms of 8-bit silence, looped by the iOS media-session unlock. */
+const SILENT_WAV = 'data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
+
 export class AudioEngine {
   master = 0.8;
   music = 0.6;
@@ -115,6 +118,7 @@ export class AudioEngine {
         return;
       }
       this.installUnlock();
+      this.installKeepAlive();
       await this.tryResume();
       if (this.pendingMusic !== null) {
         const m = this.pendingMusic;
@@ -144,11 +148,63 @@ export class AudioEngine {
   private installUnlock(): void {
     if (typeof document === 'undefined') return;
     const unlock = () => {
-      if (this.ctx && this.ctx.state !== 'running') void this.ctx.resume().catch(() => {});
+      this.unlockMediaSession();
+      if (this.ctx && this.ctx.state !== 'running' && !this.pausedFlag) void this.ctx.resume().catch(() => {});
     };
-    for (const ev of ['pointerdown', 'keydown', 'touchend']) {
+    for (const ev of ['pointerdown', 'keydown', 'touchend', 'click']) {
       document.addEventListener(ev, unlock, { capture: true, passive: true });
     }
+    this.unlockMediaSession();
+  }
+
+  private silentEl: HTMLAudioElement | null = null;
+  /**
+   * iPhone/iPad: Web Audio is muted by the ring/silent switch unless the page plays as "media".
+   * Declare a playback audio session (iOS 17+) and keep a tiny silent <audio> loop playing, which
+   * switches older iOS to the playback category too. Harmless on other platforms.
+   */
+  private unlockMediaSession(): void {
+    try {
+      const nav = navigator as Navigator & { audioSession?: { type: string } };
+      if (nav.audioSession && nav.audioSession.type !== 'playback') nav.audioSession.type = 'playback';
+    } catch {
+      /* ignore */
+    }
+    if (this.silentEl || typeof Audio === 'undefined') return;
+    try {
+      const el = new Audio(SILENT_WAV);
+      el.loop = true;
+      el.setAttribute('playsinline', '');
+      el.volume = 0.01;
+      const p = el.play();
+      this.silentEl = el;
+      if (p) p.catch(() => (this.silentEl = null)); // not allowed yet: retry on the next gesture
+    } catch {
+      this.silentEl = null;
+    }
+  }
+
+  /**
+   * Keep the context running: Safari moves it to 'interrupted' when speech synthesis or another app
+   * takes the audio session, and Chrome can suspend it when the tab is backgrounded. Resume whenever
+   * it stops while the game isn't paused.
+   */
+  private installKeepAlive(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const kick = () => {
+      if (this.ctx && !this.pausedFlag && this.ctx.state !== 'running' && (typeof document === 'undefined' || !document.hidden)) {
+        void this.ctx.resume().catch(() => {});
+      }
+    };
+    ctx.onstatechange = kick;
+    setInterval(kick, 1000);
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => setTimeout(kick, 100));
+  }
+
+  /** Make sure audio is running (e.g. right after the announcer finishes a line). */
+  ensureRunning(): void {
+    if (this.ctx && !this.pausedFlag && this.ctx.state !== 'running') void this.ctx.resume().catch(() => {});
   }
 
   setVolumes(master: number, music: number, sfx: number): void {

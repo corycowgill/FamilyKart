@@ -1,5 +1,6 @@
 import './ui/styles.css';
 import { Game } from './game/Game';
+import { audio } from './audio/AudioEngine';
 
 const viewport = document.getElementById('viewport')!;
 const ui = document.getElementById('ui')!;
@@ -16,7 +17,8 @@ async function boot(): Promise<void> {
   const test = document.createElement('canvas');
   if (!test.getContext('webgl2')) throw new Error('WebGL2 is not available.');
   const game = new Game(viewport, ui);
-  (window as unknown as { __game: Game }).__game = game;
+  (window as unknown as { __game: Game; __audio: typeof audio }).__game = game;
+  (window as unknown as { __audio: typeof audio }).__audio = audio; // debugging / audio tests
   game.updateFpsVisibility();
   await game.start((p) => (bar.style.width = `${Math.round(p * 100)}%`));
   // let the Hallucinated Games ident finish before revealing the title (the game loads underneath it)

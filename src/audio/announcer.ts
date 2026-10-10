@@ -291,6 +291,7 @@ export class Announcer {
     this.duck(true);
     const vol = this.volume();
     speaker.speak(line.text, { volume: Number.isFinite(vol) ? vol : 0.6, rate: this.rate, pitch: this.pitch }, () => {
+      audio.ensureRunning(); // Safari interrupts Web Audio while speech plays
       if (my !== this.token) return; // a cancelled line finishing late
       this.speaking = null;
       this.advance();
